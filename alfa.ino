@@ -43,7 +43,8 @@ float powerWatts = 0.0;
 float temperatureC = 25.0;
 float vibrationMag = 0.0;
 bool mpuOk = false;
-bool dhtOk = false;
+bool dhtOk = true;
+int dhtFailCount = 0;
 
 // --- Baseline (normal holat) ---
 float baseVib = 1.50;
@@ -408,12 +409,17 @@ $('scroll').addEventListener('scroll',onScroll,{passive:true});
 /* ---- AI hisobot ---- */
 async function askAI(diag){
   const box=$('ai-box');
-  if(!diag||!diag.triggered_rule_ids||!diag.triggered_rule_ids.length){
+  const motorRules=(diag&&diag.triggered_rule_ids||[]).filter(id=>id!=='R14');
+  if(!motorRules.length){
     aiKey='';box.dataset.ok='';
-    box.innerHTML='<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">AI hisoboti</b>Holat normal: tahlil talab qilinmaydi</div>';
+    if(diag&&diag.triggered_rule_ids&&diag.triggered_rule_ids.includes('R14')){
+      box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">Datchik ulanishini tekshiring (R14)</b><small>MPU-6050 yoki DHT22 javob bermayapti</small></div></div>';
+    }else{
+      box.innerHTML='<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">AI hisoboti</b>Holat normal: tahlil talab qilinmaydi</div>';
+    }
     return;
   }
-  const key=diag.triggered_rule_ids.slice().sort().join(',');
+  const key=motorRules.slice().sort().join(',');
   if(Date.now()-aiAt < (key===aiKey?30000:15000))return;
   aiKey=key;aiAt=Date.now();
   if(!box.dataset.ok) box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b>AI tahlil qilmoqda&hellip;</b><small>'+key+'</small></div></div>';
@@ -618,6 +624,7 @@ void readSensors() {
 
   float t = dht.readTemperature();
   if (!isnan(t)) {
+    dhtFailCount = 0;
     dhtOk = true;
     temperatureC = t;
     unsigned long now = millis();
@@ -633,7 +640,8 @@ void readSensors() {
       prevTempMs = now;
     }
   } else {
-    dhtOk = false;
+    dhtFailCount++;
+    if (dhtFailCount >= 3) dhtOk = false;
   }
 
   currentAmps = readCurrentAmps();
