@@ -409,18 +409,22 @@ $('scroll').addEventListener('scroll',onScroll,{passive:true});
 async function askAI(diag){
   const box=$('ai-box');
   if(!diag||!diag.triggered_rule_ids||!diag.triggered_rule_ids.length){
-    aiKey='';
+    aiKey='';box.dataset.ok='';
     box.innerHTML='<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">AI hisoboti</b>Holat normal: tahlil talab qilinmaydi</div>';
     return;
   }
   const key=diag.triggered_rule_ids.slice().sort().join(',');
-  if(key===aiKey && Date.now()-aiAt<30000)return;
+  if(Date.now()-aiAt < (key===aiKey?30000:15000))return;
   aiKey=key;aiAt=Date.now();
-  box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b>AI tahlil qilmoqda&hellip;</b><small>'+key+'</small></div></div>';
+  if(!box.dataset.ok) box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b>AI tahlil qilmoqda&hellip;</b><small>'+key+'</small></div></div>';
   try{
     const r=await fetch(AI_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(diag)});
     const ai=await r.json();
-    if(!r.ok){box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--red)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">AI xatosi: '+(ai.error||r.status)+'</b></div></div>';return}
+    if(!r.ok){
+      if(ai.error==='gemini_http_429'){aiAt=Date.now()+45000;if(box.dataset.ok)return;box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('clock')+'</span><div class="rt"><b class="ai-txt">AI kvotasi vaqtincha to\'ldi</b><small>1 daqiqadan keyin qayta uriniladi</small></div></div>';return}
+      box.dataset.ok='';box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--red)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">AI xatosi: '+(ai.error||r.status)+'</b></div></div>';return;
+    }
+    box.dataset.ok='1';
     let h='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b class="ai-txt">'+(ai.summary_uz||'Tahlil tayyor')+'</b><small>'+key+'</small></div></div>';
     (ai.ranked_causes||[]).slice(0,3).forEach(c=>{
       h+='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('alert')+'</span><div class="rt"><b>'+c.fault_id+'</b><small class="ai-txt">'+(c.evidence_uz||'')+'</small></div><span class="chip" style="--c:var(--orange)">'+c.probability_pct+'%</span></div>';
