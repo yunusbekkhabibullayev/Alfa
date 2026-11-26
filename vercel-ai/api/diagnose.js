@@ -1,12 +1,7 @@
 // api/diagnose.js  (Vercel serverless, Node 18+)
 // Joylashuv: api/diagnose.js  va  data/qurilma_dataset_v1_1.json
 // Env: GEMINI_API_KEY (majburiy), GEMINI_MODEL (ixtiyoriy), ALLOWED_ORIGIN (ixtiyoriy)
-const fs = require('fs');
-const path = require('path');
-
-const KB = JSON.parse(
-  fs.readFileSync(path.join(process.cwd(), 'data', 'qurilma_dataset_v1_1.json'), 'utf8')
-);
+const KB = require('../data/qurilma_dataset_v1_1.json');
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const MIN_INTERVAL_MS = 30_000;
 const MAX_CACHE_SIZE = 200;
