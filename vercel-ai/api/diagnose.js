@@ -2,7 +2,7 @@
 // Joylashuv: api/diagnose.js  va  data/qurilma_dataset_v1_1.json
 // Env: GEMINI_API_KEY (majburiy), GEMINI_MODEL (ixtiyoriy), ALLOWED_ORIGIN (ixtiyoriy)
 const KB = require('../data/qurilma_dataset_v1_1.json');
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const MIN_INTERVAL_MS = 30_000;
 const MAX_CACHE_SIZE = 200;
 const cache = new Map(); // key -> {t, data}  (serverless'da faqat "best effort")
