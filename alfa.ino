@@ -5,10 +5,12 @@
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <math.h>
+#include "secrets.h"
 
-// --- Wi-Fi tarmoq nomi va paroli ---
-const char* ssid     = "Redmi 13C";
-const char* password = "12345678";
+// --- Wi-Fi tarmoq nomi va paroli (secrets.h dan olinadi) ---
+const char* ssid     = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
+const char* diagToken = DIAG_API_TOKEN;
 
 // --- Vercel AI Diagnostika manzili ---
 const char* VERCEL_API_URL = "https://alfa-vercel-ai.vercel.app/api/diagnose";
@@ -36,6 +38,7 @@ DHT dht(DHTPIN, DHTTYPE);
 bool greenState = false;
 bool yellowState = false;
 bool redState = false;
+bool autoLedMode = true;
 
 float zeroCurrentVoltage = 2.5;
 float currentAmps = 0.0;
@@ -44,9 +47,10 @@ float temperatureC = 25.0;
 float vibrationMag = 0.0;
 bool mpuOk = false;
 bool dhtOk = true;
+bool tempInit = false;
 int dhtFailCount = 0;
 
-// --- Baseline (normal holat) ---
+// --- Baseline (normal holat) va ishga tushish maskasi ---
 float baseVib = 1.50;
 float baseTemp = 25.0;
 float baseCurr = 0.40;
@@ -54,6 +58,13 @@ float basePow = 2.40;
 float prevTempC = 25.0;
 unsigned long prevTempMs = 0;
 float tempRiseRatePerMin = 0.0;
+bool motorRunning = false;
+unsigned long motorStartMs = 0;
+const unsigned long INRUSH_MASK_MS = 3000;
+
+// --- Qoida barqarorligi (persistence) hisoblagichlari ---
+int pR01 = 0, pR07 = 0, pR08 = 0, pR09 = 0, pR11 = 0, pR13 = 0;
+const int PERSIST_CYCLES = 2; // 2 * 2s = 4 soniya davom etsa signal beradi
 
 unsigned long lastSensorRead = 0;
 
@@ -383,9 +394,12 @@ const hist={vib:[],temp:[],cur:[],pow:[],t:[]};
 let tab='vib',active={},log=[],scrub=null,view='home',aiKey='',aiAt=0;
 const p2=n=>String(n).padStart(2,'0');
 const hms=d=>p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const ic=n=>'<svg class="i"><use href="#i-'+n+'"/></svg>';
 const lvl=(k,v)=>v>=TH[k][1]?3:v>=TH[k][0]?2:v>=TH[k][0]*0.8?1:0;
+const NORM={vib:1.5,temp:30,cur:0.4};
+const excess=(k,v)=>Math.max(0,Math.min(1,(v-NORM[k])/Math.max(0.1,TH[k][1]-NORM[k])));
 const LVN={3:'Kritik',2:'Yuqori',1:'Ogoh.'};
 const LVC={0:'--green',1:'--teal',2:'--orange',3:'--red'};
 const fmtUp=s=>{const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>0?h+' s '+p2(m)+' d':m>0?m+' d '+p2(s%60)+' s':s+' s'};
@@ -419,25 +433,28 @@ async function askAI(diag){
   const key=motorRules.slice().sort().join(',');
   if(Date.now()-aiAt < (key===aiKey?30000:15000))return;
   aiKey=key;aiAt=Date.now();
-  if(!box.dataset.ok) box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b>AI tahlil qilmoqda&hellip;</b><small>'+key+'</small></div></div>';
+  if(!box.dataset.ok) box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b>AI tahlil qilmoqda&hellip;</b><small>'+esc(key)+'</small></div></div>';
   try{
-    const r=await fetch(AI_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(diag)});
+    const hdr={'Content-Type':'application/json'};
+    if(window._aiTok)hdr['x-api-key']=window._aiTok;
+    const r=await fetch(AI_URL,{method:'POST',headers:hdr,body:JSON.stringify(diag)});
     const ai=await r.json();
     if(!r.ok){
-      if(ai.error==='gemini_http_429'){aiAt=Date.now()+45000;if(box.dataset.ok)return;box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('clock')+'</span><div class="rt"><b class="ai-txt">AI kvotasi vaqtincha to\'ldi</b><small>1 daqiqadan keyin qayta uriniladi</small></div></div>';return}
-      box.dataset.ok='';box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--red)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">AI xatosi: '+(ai.error||r.status)+'</b></div></div>';return;
+      if(ai.error==='gemini_http_429'||ai.error==='rate_limit_exceeded'){aiAt=Date.now()+45000;if(box.dataset.ok)return;box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('clock')+'</span><div class="rt"><b class="ai-txt">AI kvotasi vaqtincha to\'ldi</b><small>1 daqiqadan keyin qayta uriniladi</small></div></div>';return}
+      box.dataset.ok='';box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--red)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">AI xatosi: '+esc(ai.error||r.status)+'</b></div></div>';return;
     }
     box.dataset.ok='1';
-    let h='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b class="ai-txt">'+(ai.summary_uz||'Tahlil tayyor')+'</b><small>'+key+'</small></div></div>';
+    let h='<div class="row"><span class="ib soft" style="--c:var(--blue)">'+ic('chip')+'</span><div class="rt"><b class="ai-txt">'+esc(ai.summary_uz||'Tahlil tayyor')+'</b><small>'+esc(key)+'</small></div></div>';
     (ai.ranked_causes||[]).slice(0,3).forEach(c=>{
-      h+='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('alert')+'</span><div class="rt"><b>'+c.fault_id+'</b><small class="ai-txt">'+(c.evidence_uz||'')+'</small></div><span class="chip" style="--c:var(--orange)">'+c.probability_pct+'%</span></div>';
+      const pct=Math.max(0,Math.min(100,Number(c.probability_pct)||0));
+      h+='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('alert')+'</span><div class="rt"><b>'+esc(c.fault_id)+'</b><small class="ai-txt">'+esc(c.evidence_uz||'')+'</small></div><span class="chip" style="--c:var(--orange)">'+pct+'%</span></div>';
     });
     if(ai.recommended_actions_uz&&ai.recommended_actions_uz.length){
-      h+='<div class="row"><span class="ib soft" style="--c:var(--green)">'+ic('shield')+'</span><div class="rt"><b>Tavsiya</b><small class="ai-txt">'+ai.recommended_actions_uz.join('; ')+'</small></div></div>';
+      h+='<div class="row"><span class="ib soft" style="--c:var(--green)">'+ic('shield')+'</span><div class="rt"><b>Tavsiya</b><small class="ai-txt">'+esc(ai.recommended_actions_uz.join('; '))+'</small></div></div>';
     }
     box.innerHTML=h;
   }catch(e){
-    box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--red)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">AI ulanish xatosi</b><small>'+e.message+'</small></div></div>';
+    box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--red)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">AI ulanish xatosi</b><small>'+esc(e.message)+'</small></div></div>';
   }
 }
 
@@ -458,7 +475,7 @@ function render(d){
   for(const k in V){
     const l=lvl(k,V[k]);
     if(l==3)c++;else if(l==2)h++;else if(l==1)w++;
-    ratio=Math.max(ratio,Math.min(1,V[k]/TH[k][1]));
+    ratio=Math.max(ratio,excess(k,V[k]));
     $('d-'+k).textContent=V[k].toFixed(dec(k))+' '+UNIT[k];setDot('d-'+k+'-s',l);
     if((active[k]||0)!==l&&l>0){log.unshift({t:hms(new Date()),m:NAME[k]+' '+V[k].toFixed(dec(k))+' '+UNIT[k],k:k,l:l});log=log.slice(0,20)}
     active[k]=l;
@@ -473,7 +490,7 @@ function render(d){
   const segs=total?[[c,css('--red')],[h,css('--orange')],[w,css('--teal')]]:[[1,css('--fill')]];
   segs.forEach(s=>{if(!s[0])return;const len=s[0]/(total||1)*circ;
     arcs.insertAdjacentHTML('beforeend','<circle cx="55" cy="55" r="40" fill="none" stroke="'+s[1]+'" stroke-width="12" stroke-linecap="butt" stroke-dasharray="'+Math.max(0,len-(total>1?2:0))+' '+circ+'" stroke-dashoffset="'+(-off)+'"/>');off+=len});
-  $('al-log').innerHTML=log.length?log.map(r=>'<div class="row"><span class="ib soft" style="--c:var('+LVC[r.l]+')">'+ic(ICON[r.k])+'</span><div class="rt"><b>'+r.m+'</b><small>'+r.t+'</small></div><span class="chip" style="--c:var('+LVC[r.l]+')">'+LVN[r.l]+'</span></div>').join(''):'<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">Hodisalar yo\'q</b>Barcha ko\'rsatkichlar chegara ichida</div>';
+  $('al-log').innerHTML=log.length?log.map(r=>'<div class="row"><span class="ib soft" style="--c:var('+LVC[r.l]+')">'+ic(ICON[r.k])+'</span><div class="rt"><b>'+esc(r.m)+'</b><small>'+esc(r.t)+'</small></div><span class="chip" style="--c:var('+LVC[r.l]+')">'+LVN[r.l]+'</span></div>').join(''):'<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">Hodisalar yo\'q</b>Barcha ko\'rsatkichlar chegara ichida</div>';
 
   // AI diagnostika
   if(d.diag)askAI(d.diag);
@@ -570,6 +587,7 @@ function tg(n){if(navigator.vibrate)navigator.vibrate(10);api('/api/toggle?led='
 $('alloff').addEventListener('click',()=>api('/api/alloff'));
 
 /* ---- ma'lumot olish ---- */
+fetch('/api/token').then(r=>r.text()).then(t=>{window._aiTok=t.trim()}).catch(()=>{});
 async function poll(){try{const r=await fetch('/json',{cache:'no-store'});render(await r.json());setOnline(true)}catch(e){setOnline(false)}}
 poll();setInterval(poll,2000);
 </script>
@@ -617,20 +635,31 @@ void readSensors() {
       mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
     }
   }
-  sensors_event_t a, g, temp;
-  if (mpu.getEvent(&a, &g, &temp)) {
+  float sumSq = 0.0;
+  int validVib = 0;
+  for (int i = 0; i < 64; i++) {
+    sensors_event_t a, g, temp;
+    if (mpu.getEvent(&a, &g, &temp)) {
+      float totalAccel = sqrt(a.acceleration.x * a.acceleration.x +
+                              a.acceleration.y * a.acceleration.y +
+                              a.acceleration.z * a.acceleration.z);
+      float dv = totalAccel - 9.81;
+      sumSq += dv * dv;
+      validVib++;
+    }
+    delayMicroseconds(800);
+  }
+  if (validVib > 0) {
     mpuOk = true;
-    float totalAccel = sqrt(a.acceleration.x * a.acceleration.x +
-                            a.acceleration.y * a.acceleration.y +
-                            a.acceleration.z * a.acceleration.z);
-    vibrationMag = fabs(totalAccel - 9.81);
+    vibrationMag = sqrt(sumSq / validVib);
   }
 
   float t = dht.readTemperature();
   if (!isnan(t)) {
     dhtFailCount = 0;
     dhtOk = true;
-    temperatureC = t;
+    if (!tempInit) { temperatureC = t; tempInit = true; }
+    else { temperatureC = 0.25f * t + 0.75f * temperatureC; }
     unsigned long now = millis();
     if (prevTempMs > 0 && now > prevTempMs) {
       float dtMin = (now - prevTempMs) / 60000.0;
@@ -650,6 +679,15 @@ void readSensors() {
 
   currentAmps = readCurrentAmps();
   powerWatts = MOTOR_VOLTAGE * currentAmps;
+
+  if (currentAmps > 0.15) {
+    if (!motorRunning) {
+      motorRunning = true;
+      motorStartMs = millis();
+    }
+  } else {
+    motorRunning = false;
+  }
 }
 
 void setBaselineFromCurrent() {
@@ -664,7 +702,23 @@ String buildDiagObj() {
   float currRatio = (baseCurr > 0.01) ? (currentAmps / baseCurr) : 1.0;
   float powRatio = (basePow > 0.01) ? (powerWatts / basePow) : 1.0;
   float tempDelta = temperatureC - baseTemp;
+  bool inrushMasked = motorRunning && (millis() - motorStartMs < INRUSH_MASK_MS);
   bool sensorOk = mpuOk && dhtOk;
+
+  bool cR15 = (!inrushMasked && currRatio >= 2.0) || temperatureC >= 60.0;
+  bool cR01 = !inrushMasked && currRatio >= 1.6 && (tempRiseRatePerMin >= 5.0 || vibRatio >= 2.0);
+  bool cR11 = !inrushMasked && vibRatio >= 2.0 && tempDelta >= 25.0 && currRatio >= 1.3;
+  bool cR07 = !inrushMasked && tempDelta >= 25.0 && currRatio >= 1.25;
+  bool cR08 = !inrushMasked && (currRatio >= 1.15 || powRatio >= 1.15) && (currentAmps > 1.5 || powerWatts > 5.5) && !(vibRatio >= 2.0 || currRatio >= 1.6);
+  bool cR09 = tempDelta >= 15.0 && temperatureC >= 50.0 && !(currRatio >= 1.15 || vibRatio >= 1.5);
+  bool cR13 = !inrushMasked && vibRatio >= 1.5 && vibrationMag > 12.0 && !(tempDelta >= 15.0 || currRatio >= 1.15);
+
+  pR01 = cR01 ? pR01 + 1 : 0;
+  pR07 = cR07 ? pR07 + 1 : 0;
+  pR08 = cR08 ? pR08 + 1 : 0;
+  pR09 = cR09 ? pR09 + 1 : 0;
+  pR11 = cR11 ? pR11 + 1 : 0;
+  pR13 = cR13 ? pR13 + 1 : 0;
 
   String rules = "";
   String level = "normal";
@@ -677,14 +731,25 @@ String buildDiagObj() {
     else if (String(lvl) == "watch" && level == "normal") level = "watch";
   };
 
-  if (currentAmps >= 2.2 || temperatureC >= 60.0) addRule("R15", "critical");
-  if (currentAmps >= 2.0 && (tempRiseRatePerMin >= 5.0 || vibrationMag > 12.0)) addRule("R01", "critical");
-  if (vibrationMag > 12.0 && temperatureC >= 50.0 && currentAmps > 1.5) addRule("R11", "alarm");
-  if (temperatureC >= 55.0 && currentAmps > 1.5) addRule("R07", "alarm");
-  if ((currentAmps > 1.5 || powerWatts > 5.5) && currentAmps < 2.2 && vibrationMag <= 12.0) addRule("R08", "warning");
-  if (temperatureC >= 50.0 && currentAmps <= 1.5 && vibrationMag <= 12.0) addRule("R09", "warning");
-  if (vibrationMag > 12.0 && temperatureC < 50.0 && currentAmps <= 1.5) addRule("R13", "warning");
+  if (cR15) addRule("R15", "critical");
+  if (pR01 >= PERSIST_CYCLES) addRule("R01", "critical");
+  if (pR11 >= PERSIST_CYCLES) addRule("R11", "alarm");
+  if (pR07 >= PERSIST_CYCLES) addRule("R07", "alarm");
+  if (pR08 >= PERSIST_CYCLES) addRule("R08", "warning");
+  if (pR09 >= PERSIST_CYCLES) addRule("R09", "warning");
+  if (pR13 >= PERSIST_CYCLES) addRule("R13", "warning");
   if (!sensorOk) addRule("R14", "watch");
+
+  if (autoLedMode) {
+    if (level == "normal") {
+      greenState = true; yellowState = false; redState = false;
+    } else if (level == "watch" || level == "warning") {
+      greenState = false; yellowState = true; redState = false;
+    } else {
+      greenState = false; yellowState = false; redState = true;
+    }
+    applyLedStates();
+  }
 
   String json = "{";
   json += "\"device_id\":\"DEV-ZAVOD-001\",";
@@ -758,7 +823,13 @@ void handleBaseline() {
   server.send(200, "application/json", buildJson());
 }
 
+void handleToken() {
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "text/plain", diagToken);
+}
+
 void toggleByName(const String& led) {
+  autoLedMode = false;
   if (led == "green") greenState = !greenState;
   else if (led == "yellow") yellowState = !yellowState;
   else if (led == "red") redState = !redState;
@@ -772,6 +843,7 @@ void handleApiToggle() {
 }
 
 void handleApiAllOff() {
+  autoLedMode = false;
   greenState = yellowState = redState = false;
   applyLedStates();
   server.send(200, "application/json", buildJson());
@@ -834,6 +906,7 @@ void setup() {
   server.on("/json", handleJson);
   server.on("/diag", handleDiag);
   server.on("/baseline", handleBaseline);
+  server.on("/api/token", handleToken);
   server.on("/api/toggle", handleApiToggle);
   server.on("/api/alloff", handleApiAllOff);
   server.on("/toggle", handleToggle);

@@ -1,11 +1,62 @@
 // api/diagnose.js  (Vercel serverless, Node 18+)
 // Joylashuv: api/diagnose.js  va  data/qurilma_dataset_v1_1.json
-// Env: GEMINI_API_KEY (majburiy), GEMINI_MODEL (ixtiyoriy), ALLOWED_ORIGIN (ixtiyoriy)
+// Env: GEMINI_API_KEY (majburiy), GEMINI_MODEL (ixtiyoriy), ALLOWED_ORIGIN (ixtiyoriy), DIAG_API_TOKEN (ixtiyoriy)
 const KB = require('../data/qurilma_dataset_v1_1.json');
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const MIN_INTERVAL_MS = 30_000;
 const MAX_CACHE_SIZE = 200;
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_REQ = 12;
+
 const cache = new Map(); // key -> {t, data}  (serverless'da faqat "best effort")
+const rateMap = new Map(); // ip -> {t, count}
+
+const ALLOWED_FEATURES = new Set([
+  'vib_rms_m_s2', 'vib_ratio',
+  'temp_motor_C', 'temp_delta_K', 'temp_rise_rate_K_per_min',
+  'current_A', 'current_ratio', 'current_ratio_same_load',
+  'power_W', 'power_ratio', 'sensor_ok',
+]);
+const ALLOWED_LOAD_MODES = new Set(['idle', 'mid', 'nominal', 'rated']);
+const ALLOWED_LEVELS = new Set(['normal', 'watch', 'warning', 'alarm', 'critical']);
+
+function sanitizeFeatures(raw) {
+  const clean = {};
+  for (const k of Object.keys(raw)) {
+    if (!ALLOWED_FEATURES.has(k)) continue;
+    const v = raw[k];
+    if (k === 'sensor_ok') {
+      if (typeof v === 'boolean') clean[k] = v;
+    } else if (typeof v === 'number' && Number.isFinite(v)) {
+      clean[k] = v;
+    }
+  }
+  return clean;
+}
+
+function checkRateLimit(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  const ip = (typeof fwd === 'string' ? fwd.split(',')[0].trim() : req.socket?.remoteAddress) || 'unknown';
+  const now = Date.now();
+  const rec = rateMap.get(ip);
+  if (!rec || now - rec.t >= RATE_WINDOW_MS) {
+    if (rateMap.size >= 500) rateMap.clear();
+    rateMap.set(ip, { t: now, count: 1 });
+    return true;
+  }
+  if (rec.count >= RATE_MAX_REQ) return false;
+  rec.count++;
+  return true;
+}
+
+function checkAuth(req) {
+  const token = process.env.DIAG_API_TOKEN;
+  if (!token) return true;
+  const headerKey = req.headers['x-api-key'];
+  const auth = req.headers['authorization'];
+  const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  return headerKey === token || bearer === token;
+}
 
 function pickContext(deviceId, ruleIds) {
   const profile = KB.device_profiles.find(p => p.device_id === deviceId);
@@ -26,7 +77,7 @@ function systemPrompt() {
   ].join('\n');
 }
 
-function userPrompt(body, ctx) {
+function userPrompt(body, ctx, cleanFeatures) {
   const p = ctx.profile || {};
   return JSON.stringify({
     device: {
@@ -39,9 +90,9 @@ function userPrompt(body, ctx) {
       multi_signal_uz: KB.global_rules.multi_signal_uz,
       ambient_compensation_uz: KB.global_rules.ambient_compensation_uz,
     },
-    features_now: body.features_now,
-    load_mode: body.load_mode,
-    edge_level: body.level,
+    features_now: cleanFeatures,
+    load_mode: ALLOWED_LOAD_MODES.has(body.load_mode) ? body.load_mode : 'nominal',
+    edge_level: ALLOWED_LEVELS.has(body.level) ? body.level : 'warning',
     triggered_rules: ctx.rules.map(r => ({
       id: r.id, level: r.level, message_uz: r.message_uz,
       fault_ranking: r.fault_ranking, confidence: r.confidence,
@@ -66,9 +117,11 @@ function validate(out, allowedFaults) {
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST kerak' });
+
+  if (!checkAuth(req)) return res.status(401).json({ error: 'unauthorized' });
 
   let body;
   try {
@@ -88,19 +141,28 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'device_id, features_now, triggered_rule_ids kerak' });
   }
 
+  const ruleIds = body.triggered_rule_ids.filter(id => typeof id === 'string').slice(0, 15);
+
   // Qoida ishga tushmagan bo'lsa Gemini chaqirilmaydi (kvota tejaladi, uydirma kamayadi)
-  if (body.triggered_rule_ids.length === 0) {
+  if (ruleIds.length === 0) {
     return res.status(200).json({ status: 'normal', summary_uz: 'Qoidalar ishga tushmagan: holat normal.' });
   }
 
-  const key = body.device_id + '|' + [...body.triggered_rule_ids].sort().join(',');
+  const key = body.device_id + '|' + [...ruleIds].sort().join(',');
   const hit = cache.get(key);
   if (hit && Date.now() - hit.t < MIN_INTERVAL_MS) return res.status(200).json({ ...hit.data, cached: true });
 
-  const ctx = pickContext(body.device_id, body.triggered_rule_ids);
+  if (!checkRateLimit(req)) {
+    res.setHeader('Retry-After', '60');
+    return res.status(429).json({ error: 'rate_limit_exceeded' });
+  }
+
+  const ctx = pickContext(body.device_id, ruleIds);
   if (!ctx.profile) return res.status(404).json({ error: 'noma\'lum device_id' });
   if (ctx.rules.length === 0) return res.status(400).json({ error: 'noma\'lum triggered_rule_ids' });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'GEMINI_API_KEY sozlanmagan' });
+
+  const cleanFeatures = sanitizeFeatures(body.features_now);
   const allowedFaults = new Set(ctx.faults.map(f => f.id));
 
   try {
@@ -111,7 +173,7 @@ module.exports = async function handler(req, res) {
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt() }] },
-          contents: [{ role: 'user', parts: [{ text: userPrompt(body, ctx) }] }],
+          contents: [{ role: 'user', parts: [{ text: userPrompt(body, ctx, cleanFeatures) }] }],
           generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
         }),
       }
