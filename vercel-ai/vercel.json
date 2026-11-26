@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/diagnose.js": {
+      "includeFiles": "data/qurilma_dataset_v1_1.json"
+    }
+  }
+}
+

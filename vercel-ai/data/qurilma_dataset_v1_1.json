@@ -1,0 +1,2838 @@
+{
+  "meta": {
+    "name": "Qurilma holati diagnostik dataseti (DC motor + reduktor, Arduino/ESP32 + Gemini)",
+    "schema_version": "1.1",
+    "created": "2026-11-25",
+    "language": "uz-Latn",
+    "parameters": [
+      "Vibratsiya",
+      "Harorat",
+      "Tok",
+      "Quvvat"
+    ],
+    "purpose_uz": "4 parametr bo'yicha qurilmaning normal holatini belgilash, oshganda qaysi qismda muammo bo'lishi mumkinligini aytuvchi alertlar uchun bilimlar bazasi.",
+    "important_notes_uz": [
+      "Bu fayl standartlar va ochiq ilmiy manbalardan yig'ilgan BILIMLAR BAZASI (shablon). Aniq qurilmangizning normal qiymatlari (baseline) faqat o'z o'lchovlaringizdan to'ldiriladi.",
+      "Har bir chegarada 'basis' va 'confidence' maydoni bor: 'standard' = standartdan, 'standard_derived' = standartdan hisoblangan, 'heuristic' = muhandislik taxmini (sinab sozlash kerak).",
+      "ISO 10816 va izolyatsiya sinflari chegaralari standartdan; tok, quvvat va baza nisbatlari ('ratio') chegaralari esa boshlang'ich taxmin, o'z qurilmangizda sozlanadi.",
+      "Ilmiy adabiyotning katta qismi AC asinxron motorlar uchun; DC motorlar uchun tok imzosi tahlili bo'yicha ishlar kamroq. Shuning uchun DC uchun mantiq S6-S9, S12, S13, S19 ga tayanadi.",
+      "Bu diagnostika yordamchi vosita. Kritik xavfsizlik to'xtatishlari uchun apparat himoyasi (qo'shimcha tok himoyasi, termik sug'urta) qo'llang.",
+      "v1.1: ISO 10816 mm/s chegaralari ~15 kVt gacha mashinalar uchun; 6 V kichik motor va MPU-6050 uchun mutlaq mm/s ma'nosiz. DEV-ZAVOD-001 da faqat baza chizig'iga nisbat (vib_ratio) ishlatiladi."
+    ],
+    "next_step_uz": "Qurilma sog'lom turganda baseline ni o'lchab, device_profiles ichidagi baseline.by_load maydonlarini to'ldiring, so'ng rated maydonlarini kiriting.",
+    "updated": "2026-11-26",
+    "changelog_uz": [
+      "DEV-ZAVOD-001 profili qo'shildi: haqiqiy uskuna (MPU-6050, DHT22, ACS712-5A, 6 V) imkoniyatlariga moslangan.",
+      "Har bir qoida uchun 'hardware_support' (full/partial/unavailable) belgilandi: ESP32 da hozir qaysi qoidalar ishlashi aniq.",
+      "Yangi qoidalar: R13 (faqat tebranish), R14 (sensor nosozligi), R15 (qattiq xavfsizlik). Yangi nuqsonlar: F13, F14.",
+      "Ishga tushish toki (inrush) maskasi, motor o'chiq holati, edge persistence/hysteresis parametrlari qo'shildi.",
+      "current_ratio watch chegarasi 1.0 -> 1.05 (nominal yukda shovqin tufayli doimiy 'watch' bo'lmasligi uchun).",
+      "synthetic_scenarios (Gemini few-shot va qoidalarni sinash uchun), data_collection_plan va open_datasets_to_harvest qo'shildi."
+    ]
+  },
+  "sources": [
+    {
+      "id": "S1",
+      "title": "Industrial Motor Vibration Analysis: ISO10816-1 Interpretation and Spectrum Diagnostics",
+      "url": "https://industrialmonitordirect.com/blogs/knowledgebase/industrial-motor-vibration-analysis-iso10816-1-interpretation-and-spectrum-diagnostics",
+      "type": "texnik maqola",
+      "used_for": "podshipnik nuqson chastotalari (BPFO, BPFI), spektr tahlili"
+    },
+    {
+      "id": "S2",
+      "title": "Vibration Analysis Basics: RMS, ISO 10816, Bearing Faults (ThingsBoard Trendz)",
+      "url": "https://thingsboard.io/docs/trendz/vibration/basics/",
+      "type": "texnik qo'llanma",
+      "used_for": "velocity RMS, ISO zonalari, garmonikalar = bo'shashish, baza chizig'iga nisbat"
+    },
+    {
+      "id": "S3",
+      "title": "Vibration Alarm Thresholds: How to Set ISO Standards (Tractian)",
+      "url": "https://tractian.com/en/glossary/vibration-alarm-thresholds",
+      "type": "sanoat qo'llanmasi",
+      "used_for": "ISO 10816/20816 sinf chegaralari jadvali"
+    },
+    {
+      "id": "S4",
+      "title": "ISO 10816-1 Annex B zone limits (Vibromera)",
+      "url": "https://vibromera.eu/?p=2",
+      "type": "texnik maqola",
+      "used_for": "ISO 10816-1 A/B, B/C, C/D chegaralari (ikkinchi manba bilan tasdiqlangan)"
+    },
+    {
+      "id": "S5",
+      "title": "Machine diagnosis (tebranish diagnostikasi qo'llanmasi)",
+      "url": "https://www.scribd.com/doc/127310127/machine-diagnosis",
+      "type": "o'quv qo'llanma",
+      "used_for": "tasma orqali uzatilgan tebranish, nomutanosiblik, o'qlar mos kelmasligi"
+    },
+    {
+      "id": "S6",
+      "title": "Testing tip: Armature defects on DC motors (PdMA)",
+      "url": "https://reliableplant.com/Articles/Print/27154?id=27154",
+      "type": "sanoat maqolasi",
+      "used_for": "DC motor yakor tokida cho'tka o'tish chastotasi modulyatsiyasi"
+    },
+    {
+      "id": "S7",
+      "title": "Hanus, Smid. Non-intrusive current-based fault detection of electro-mechanical actuators. Metrol. Meas. Syst. 29(3), 2022",
+      "url": "https://journals.pan.pl//Content/124546/PDF/art05-01281_int.pdf",
+      "type": "ilmiy maqola",
+      "used_for": "cho'tkali DC motorda jam (qisilib qolish) va chulg'am qisqa tutashuvi tok orqali"
+    },
+    {
+      "id": "S8",
+      "title": "Commutator fault detection of brushed DC motor using thermal assessment (UMP, 2019)",
+      "url": "http://umpir.ump.edu.my/id/eprint/24121/2/1.1%20Commutator%20fault%20detection%20of%20brushed%20dc%20motor.pdf",
+      "type": "ilmiy maqola",
+      "used_for": "kollektor nuqsonida harorat profili farqi; casing, magnit, cho'tka, podshipnikda o'lchash"
+    },
+    {
+      "id": "S9",
+      "title": "Filina et al. Increasing the Efficiency of Diagnostics in the Brush-Commutator Assembly of a DC Electric Motor. Energies 17(1):17, 2024",
+      "url": "https://www.mdpi.com/1996-1073/17/1/17",
+      "type": "ilmiy maqola",
+      "used_for": "cho'tka-kollektor eskirganda shovqin, tebranish, harorat oshishi"
+    },
+    {
+      "id": "S10",
+      "title": "Gu, Elhaj, Rgeai, Ball, Ghretli. Gearbox Fault Detection Using Spectrum Analysis of the Drive Motor Current Signal (2010)",
+      "url": "https://katalog.lib.cas.cz/KNAV/EdsRecord/edsair,edsair.doi.dedup.....41822f684db72737df714a97d0eb9ae3",
+      "type": "ilmiy maqola",
+      "used_for": "reduktor tish nuqsonida tok spektrida yon polosalar o'sishi"
+    },
+    {
+      "id": "S11",
+      "title": "Helical Gearbox Defect Detection with Machine Learning Using Regular Mesh Components and Sidebands",
+      "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11174595/",
+      "type": "ilmiy maqola",
+      "used_for": "tishli uzatma nuqsonlari: mesh chastotasi, garmonikalar, yon polosalar; moy/harorat/shovqin o'zgarishi"
+    },
+    {
+      "id": "S12",
+      "title": "US9097767B2: DC-motor and fuel pump faults and brush-wear prognosis",
+      "url": "https://patents.google.com/patent/US9097767",
+      "type": "patent",
+      "used_for": "DC motorning tipik nuqsonlari ro'yxati (podshipnik, cho'tka/kollektor, magnit oqimi yo'qolishi, chulg'am, ekssentrisitet)"
+    },
+    {
+      "id": "S13",
+      "title": "Beloiu. Fault diagnosis of permanent magnet DC motor using vibration and current signature analysis",
+      "url": "https://scite.ai/authors/robert-beloiu-8ZKlG",
+      "type": "ilmiy maqola (annotatsiya)",
+      "used_for": "kollektor qisqa tutashuvi va magnit siljishi tebranish va tok spektrida farq beradi"
+    },
+    {
+      "id": "S14",
+      "title": "ABB Distribution Automation Handbook 8.11, Motor Protection (IEC 60034-1 insulation classes)",
+      "url": "https://library.e.abb.com/public/58df388d653856c0c125795f00432d0c/DAHandbook_Section_08p11_Motor-Protection_757291_ENa.pdf",
+      "type": "ishlab chiqaruvchi qo'llanma",
+      "used_for": "izolyatsiya sinflari B/F/H maksimal harorati 130/155/180 C"
+    },
+    {
+      "id": "S15",
+      "title": "NEMA Insulation Classes (EngineeringToolbox) va NEMA vs IEC motor standards",
+      "url": "https://www.engineeringtoolbox.com/amp/nema-insulation-classes-d_734.html",
+      "type": "texnik ma'lumotnoma",
+      "used_for": "izolyatsiya sinflari, ruxsat etilgan harorat ko'tarilishi, 40 C atrof harorat bazasi"
+    },
+    {
+      "id": "S16",
+      "title": "Multi-modal condition monitoring (Tractian glossary)",
+      "url": "https://tractian.com/en/glossary/multi-modal",
+      "type": "sanoat qo'llanmasi",
+      "used_for": "uchta signalni (tebranish, harorat, tok) birga ishlatish; atrof harorat bilan adashish xavfi; ehtimoliy sabablar reytingi"
+    },
+    {
+      "id": "S17",
+      "title": "System and methods of failure prediction for rotating electrical machinery (US 11378947)",
+      "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11378947",
+      "type": "patent",
+      "used_for": "reduktor mesh chastotasi yon polosalari amplitudasi 3% dan oshsa signal"
+    },
+    {
+      "id": "S18",
+      "title": "Motor Ieee PDF / AG05 Temperature Rise (izolyatsiya umri)",
+      "url": "https://www.scribd.com/doc/223703819/AG05-Temperature-Rise",
+      "type": "texnik hujjat",
+      "used_for": "harorat har 10 C ga oshsa izolyatsiya eskirishi taxminan 2 baravar tezlashadi"
+    },
+    {
+      "id": "S19",
+      "title": "Open data: dataset of typical faults (commutator, winding, brush wear) in inexpensive DC motors (CARTIF, ADCAIJ 2020)",
+      "url": "https://revistas.usal.es/index.php/2255-2863/article/download/ADCAIJ2020948394/25040",
+      "type": "ochiq dataset haqida maqola",
+      "used_for": "arzon DC motorlar uchun real nuqsonli ochiq dataset - o'z o'lchovlaringizni tekshirish uchun"
+    },
+    {
+      "id": "S20",
+      "title": "Vibration and current dataset of three-phase PMSM with stator faults (Mendeley Data, DOI 10.17632/rgn5brrgrn.5)",
+      "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9957734/",
+      "type": "ochiq dataset",
+      "used_for": "stator qisqa tutashuvi tebranish va tok ma'lumotlari (PMSM, DC uchun faqat taqqoslash)"
+    }
+  ],
+  "severity_levels": {
+    "normal": {
+      "rank": 0,
+      "uz": "Normal",
+      "action_uz": "Hech narsa qilish shart emas"
+    },
+    "watch": {
+      "rank": 1,
+      "uz": "Kuzatuv",
+      "action_uz": "Trendni kuzating, keyingi rejaviy ko'rikda tekshiring"
+    },
+    "warning": {
+      "rank": 2,
+      "uz": "Ogohlantirish",
+      "action_uz": "Yaqin kunlarda tekshiruv va texnik xizmat rejalashtiring"
+    },
+    "alarm": {
+      "rank": 3,
+      "uz": "Xavfli",
+      "action_uz": "Yukni kamaytiring, zudlik bilan tekshiring"
+    },
+    "critical": {
+      "rank": 4,
+      "uz": "Kritik",
+      "action_uz": "Qurilmani darhol to'xtating (avtomatik o'chirish)"
+    }
+  },
+  "features_schema": {
+    "vib_rms_mm_s": "tebranish tezligi RMS (mm/s)",
+    "vib_ratio": "hozirgi vib_rms / baza chizig'idagi vib_rms",
+    "vib_dominant_order": "asosiy cho'qqi chastotasi / val aylanish chastotasi (1x, 2x ...)",
+    "vib_harmonics_count": "1x ning butun garmonikalari soni (bo'shashish belgisi)",
+    "vib_hf_ratio": "yuqori chastotali (podshipnik zarbasi) energiyasi / baza chizig'i",
+    "vib_gear_sideband_pct": "mesh chastotasi atrofidagi yon polosa amplitudasi, markaziy mesh amplitudasining %",
+    "temp_motor_C": "motor korpusi harorati",
+    "temp_bearing_C": "podshipnik harorati",
+    "temp_brush_C": "cho'tka/kollektor yaqinidagi harorat",
+    "temp_gearbox_C": "reduktor korpusi harorati",
+    "temp_ambient_C": "atrof muhit harorati",
+    "temp_delta_K": "(o'lchangan harorat - atrof harorati) - baza chizig'idagi shu ayirma",
+    "temp_rise_rate_K_per_min": "haroratning o'sish tezligi",
+    "current_A": "o'rtacha tok (A)",
+    "current_ratio": "current_A / nominal tok",
+    "current_ripple_pct": "tok pulsatsiyasi (cho'tka o'tish chastotasida), o'rtacha tokning %",
+    "current_ripple_ratio": "hozirgi ripple / baza chizig'idagi ripple",
+    "power_W": "V x I (Vt)",
+    "power_ratio": "power_W / nominal quvvat",
+    "speed_ratio": "hozirgi aylanish tezligi / yuk bilan kutilgan tezlik (tezlik datchigi bo'lsa)",
+    "vib_rms_m_s2": "tebranish tezlanishi RMS (m/s^2), o'zgarmas tashkil (g) ayirilgan; MPU-6050 dan ~1 kHz paket (256 namuna)",
+    "current_ratio_same_load": "current_A / shu yuk rejimidagi baza chizig'i toki"
+  },
+  "standards": {
+    "iso_10816_vibration": {
+      "standard": "ISO 10816-1 (hozir ISO 20816-1 bilan almashtirilgan; zonalar A-D sxemasi saqlangan)",
+      "measurement": "umumiy tezlik RMS, mm/s, podshipnik korpusida, 10-1000 Hz oralig'ida",
+      "zones_uz": {
+        "A": "yangi/ta'mirdan chiqqan mashina darajasi",
+        "B": "cheksiz uzoq muddat ishlash uchun maqbul",
+        "C": "uzoq muddat uzluksiz ishlash uchun yaroqsiz, tuzatish choralari kerak",
+        "D": "mashinaga zarar yetkazishi mumkin"
+      },
+      "classes": {
+        "I": {
+          "desc_uz": "kichik mashinalar, taxminan 15 kVt gacha",
+          "A_B": 0.71,
+          "B_C": 1.8,
+          "C_D": 4.5
+        },
+        "II": {
+          "desc_uz": "o'rta mashinalar 15-75 kVt",
+          "A_B": 1.12,
+          "B_C": 2.8,
+          "C_D": 7.1
+        },
+        "III": {
+          "desc_uz": "katta mashinalar, qattiq poydevor",
+          "A_B": 1.8,
+          "B_C": 4.5,
+          "C_D": 11.2
+        },
+        "IV": {
+          "desc_uz": "katta mashinalar, yumshoq poydevor",
+          "A_B": 2.8,
+          "B_C": 7.1,
+          "C_D": 18.0
+        }
+      },
+      "source_ids": [
+        "S2",
+        "S3",
+        "S4"
+      ],
+      "confidence": "high",
+      "caution_uz": "Standart tebranishni korpusda tezlik (mm/s) bilan baholaydi. Arduino datchiklari (ADXL345, MPU6050) tezlanish beradi: tezlikni high-pass filtr va integrallash bilan hisoblang. Arzon datchiklarda mutlaq mm/s qiymati ishonchsiz bo'lishi mumkin, shuning uchun asosiy mezon sifatida baza chizig'iga nisbatni (vib_ratio) ishlating, ISO zonasini esa qo'shimcha tekshiruv sifatida."
+    },
+    "insulation_classes": {
+      "source_ids": [
+        "S14",
+        "S15"
+      ],
+      "confidence": "high",
+      "classes": {
+        "B": {
+          "max_winding_C": 130,
+          "nema_rise_K_at_1_0_SF": 80
+        },
+        "F": {
+          "max_winding_C": 155,
+          "nema_rise_K_at_1_0_SF": 105
+        },
+        "H": {
+          "max_winding_C": 180,
+          "nema_rise_K_at_1_0_SF": 125
+        }
+      },
+      "reference_ambient_C": 40,
+      "life_rule_uz": "Isitish har 10 C ga oshsa izolyatsiya eskirishi taxminan 2 baravar tezlashadi (S18).",
+      "derived_alert_margins": {
+        "warning_below_limit_K": 25,
+        "alarm_below_limit_K": 10,
+        "basis_uz": "ABB F sinfi B ko'tarilish bilan 25 K zaxira, qo'shimcha 10 K issiq nuqta zaxirasi beradi (S14). Shu zaxiralar ogohlantirish va xavf pog'onalariga aylantirildi.",
+        "confidence": "medium"
+      }
+    }
+  },
+  "global_rules": {
+    "baseline_learning": {
+      "procedure_uz": [
+        "Qurilma sog'lom va yangi yoki yaqinda ta'mirlangan holatda 3 xil yuk darajasida (bo'sh yurish, o'rta yuk, nominal yuk) kamida 30 daqiqadan o'lchang.",
+        "Har bir yuk uchun har bir parametrning o'rtacha (mean) va standart og'ish (std) qiymatlarini yozing.",
+        "Atrof harorati qiymatini ham yozing, chunki harorat atrofga bog'liq.",
+        "Baza chizig'ini har 3-6 oyda yoki ta'mirdan keyin yangilang."
+      ],
+      "confidence": "medium"
+    },
+    "persistence_uz": "Alert faqat shart ketma-ket kamida 3 ta oynada (masalan 3 x 10 soniya) bajarilsa beriladi, bir martalik shovqin uchun emas.",
+    "hysteresis_uz": "Alert holatidan chiqish uchun qiymat chegaradan kamida 10% pastga tushishi kerak.",
+    "load_compensation_uz": "Tok va quvvatni yuk darajasiga qarab solishtiring: bo'sh yurishda me'yor boshqa, nominal yukda boshqa.",
+    "ambient_compensation_uz": "Harorat qoidalarida temp_delta_K ishlating. Faqat harorat ko'tarilsa, bu nosozlik ham, atrof issig'i ham bo'lishi mumkin (S16).",
+    "multi_signal_uz": "Bitta signal o'zgarsa daraja ko'pi bilan 'watch' yoki 'warning'. 'alarm' va 'critical' uchun kamida ikkita mustaqil signal (masalan tebranish va harorat, yoki tok va harorat) mos kelishi kerak.",
+    "sensor_location_warning_uz": "Tebranish katta o'lchangan joy nosoz joy bo'lmasligi mumkin: bir misolda motordagi kuchli tebranish tasma uzatmasi orqali kelgan (S5). Shuning uchun har bir muhim podshipnikka alohida datchik qo'ying va qaysi nuqtada o'lchaganingizni yozib boring.",
+    "hard_safety_uz": "Kritik to'xtatish qoidalarini (tok yoki harorat chegarasi) Gemini'ga qoldirmang: ular .ino ichida oddiy shart bilan ishlasin. Gemini tushuntirish va sababni tartiblash uchun.",
+    "startup_mask_uz": "Motor yoqilganda birinchi ~4 s da inrush toki normal; bu oynada qoidalar tekshirilmaydi va baza o'rganilmaydi.",
+    "motor_off_uz": "Tok < 0.05 A bo'lsa motor o'chiq hisoblanadi: alert berilmaydi, atrof harorati yangilanadi.",
+    "edge_params": {
+      "tick_s": 2,
+      "persistence_windows": 3,
+      "critical_windows": 2,
+      "clear_windows": 5,
+      "hysteresis_basis_uz": "Edge'da qiymat emas, vaqt bo'yicha: pasayish kamida 5 ketma-ket oynada barqaror bo'lsa daraja tushadi."
+    },
+    "voltage_uz": "Hozir V=6.0 doimiy; quvvat = 6 x I. Kuchlanishni o'lchasangiz (ADC bo'luvchi yoki INA219) quvvat hisobi haqiqiy bo'ladi va F14 aniqlanadi."
+  },
+  "device_profiles": [
+    {
+      "device_id": "DEV-001",
+      "name": "Cho'tkali DC motor (shablon)",
+      "model": "to'ldiriladi",
+      "type": "dc_motor_brushed",
+      "has_gearbox": false,
+      "location_note": null,
+      "rated": {
+        "voltage_V": null,
+        "current_A": null,
+        "power_W": null,
+        "speed_rpm": null,
+        "insulation_class": null,
+        "iso_vibration_class": "I",
+        "gear_teeth_pinion": null,
+        "gear_teeth_wheel": null,
+        "brush_count": null,
+        "bearing_designation": null
+      },
+      "sensors": {
+        "vibration": null,
+        "current": null,
+        "temperature": null,
+        "speed": null
+      },
+      "baseline": {
+        "learned": false,
+        "ambient_C": null,
+        "by_load": {
+          "idle": {
+            "vib_rms_mm_s": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            },
+            "current_ripple_pct": {
+              "mean": null,
+              "std": null
+            }
+          },
+          "mid": {
+            "vib_rms_mm_s": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            },
+            "current_ripple_pct": {
+              "mean": null,
+              "std": null
+            }
+          },
+          "rated": {
+            "vib_rms_mm_s": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            },
+            "current_ripple_pct": {
+              "mean": null,
+              "std": null
+            }
+          }
+        }
+      },
+      "thresholds": {
+        "vibration": {
+          "source_ids": [
+            "S2",
+            "S3",
+            "S4"
+          ],
+          "iso_class_ref": "I",
+          "absolute_mm_s": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 0.71
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.8
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 4.5
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 7.1
+            }
+          ],
+          "absolute_basis_uz": "ISO 10816-1 Class I: A/B=0.71, B/C=1.8, C/D=4.5 mm/s. 'critical' uchun Class II C/D (7.1) olingan, bu bizning qo'shimcha zaxiramiz.",
+          "ratio_to_baseline": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.5
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 2.0
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 3.0
+            }
+          ],
+          "ratio_basis": "heuristic",
+          "ratio_confidence": "low",
+          "ratio_note_uz": "2x doiraga nisbat umumiy amaliyotga mos (S2 qiymatni mashinaning o'z normasiga nisbatan baholaydi), aniq sonlar esa sizning qurilmangizda sinab sozlanishi kerak."
+        },
+        "temperature": {
+          "source_ids": [
+            "S14",
+            "S15",
+            "S16",
+            "S18"
+          ],
+          "winding_abs_by_insulation_class": {
+            "B": {
+              "warning_C": 105,
+              "alarm_C": 120,
+              "critical_C": 130
+            },
+            "F": {
+              "warning_C": 130,
+              "alarm_C": 145,
+              "critical_C": 155
+            },
+            "H": {
+              "warning_C": 155,
+              "alarm_C": 170,
+              "critical_C": 180
+            }
+          },
+          "winding_basis": "standard_derived",
+          "winding_confidence": "medium",
+          "delta_over_baseline_K": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 8
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 25
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 40
+            }
+          ],
+          "delta_basis": "heuristic",
+          "delta_confidence": "low",
+          "rise_rate_K_per_min": [
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 2.0
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 5.0
+            }
+          ],
+          "rise_rate_basis": "heuristic",
+          "rise_rate_confidence": "low",
+          "note_uz": "Kichik DC motorda o'lchangan korpus harorati chulg'am issiq nuqtasidan past bo'ladi. Chulg'am chegaralarini to'g'ridan-to'g'ri korpus haroratiga qo'llash o'rniga, delta_over_baseline qoidasini asosiy qilib ishlating, abs chegaralarni esa chulg'am haroratini baholay olsangiz (qarshilik usuli) ishlating."
+        },
+        "current": {
+          "source_ids": [
+            "S7",
+            "S12"
+          ],
+          "ratio_to_rated": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.05
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.3
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 1.6
+            }
+          ],
+          "ratio_basis": "heuristic",
+          "ratio_confidence": "low",
+          "ratio_to_baseline_same_load": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.1
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.5
+            }
+          ],
+          "ripple_ratio_to_baseline": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.3
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.8
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 2.5
+            }
+          ],
+          "ripple_source_ids": [
+            "S6"
+          ],
+          "ripple_basis": "heuristic",
+          "ripple_confidence": "low",
+          "ripple_note_uz": "Cho'tka o'tish chastotasi = aylanish chastotasi x cho'tka (yoki kollektor segmenti) soni; masalan 2000 ayl/min va 4 cho'tka ushlagichida 133,33 Hz (S6). Shu chastotadagi amplituda trendini kuzating."
+        },
+        "power": {
+          "source_ids": [
+            "S16"
+          ],
+          "ratio_to_rated": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.05
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.3
+            }
+          ],
+          "ratio_to_baseline_same_load": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.1
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.5
+            }
+          ],
+          "basis": "heuristic",
+          "confidence": "low",
+          "note_uz": "Quvvat P = U x I. Mexanik chiqish quvvati o'zgarmagan holda kirish quvvati oshsa, yo'qotishlar (ishqalanish, issiqlik) oshgan."
+        }
+      }
+    },
+    {
+      "device_id": "DEV-002",
+      "name": "Reduktorli DC motor / stanok yuritmasi (shablon)",
+      "model": "to'ldiriladi",
+      "type": "dc_motor_brushed",
+      "has_gearbox": true,
+      "location_note": null,
+      "rated": {
+        "voltage_V": null,
+        "current_A": null,
+        "power_W": null,
+        "speed_rpm": null,
+        "insulation_class": null,
+        "iso_vibration_class": "I",
+        "gear_teeth_pinion": null,
+        "gear_teeth_wheel": null,
+        "brush_count": null,
+        "bearing_designation": null
+      },
+      "sensors": {
+        "vibration": null,
+        "current": null,
+        "temperature": null,
+        "speed": null
+      },
+      "baseline": {
+        "learned": false,
+        "ambient_C": null,
+        "by_load": {
+          "idle": {
+            "vib_rms_mm_s": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            },
+            "current_ripple_pct": {
+              "mean": null,
+              "std": null
+            }
+          },
+          "mid": {
+            "vib_rms_mm_s": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            },
+            "current_ripple_pct": {
+              "mean": null,
+              "std": null
+            }
+          },
+          "rated": {
+            "vib_rms_mm_s": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            },
+            "current_ripple_pct": {
+              "mean": null,
+              "std": null
+            }
+          }
+        }
+      },
+      "thresholds": {
+        "vibration": {
+          "source_ids": [
+            "S2",
+            "S3",
+            "S4"
+          ],
+          "iso_class_ref": "I",
+          "absolute_mm_s": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 0.71
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.8
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 4.5
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 7.1
+            }
+          ],
+          "absolute_basis_uz": "ISO 10816-1 Class I: A/B=0.71, B/C=1.8, C/D=4.5 mm/s. 'critical' uchun Class II C/D (7.1) olingan, bu bizning qo'shimcha zaxiramiz.",
+          "ratio_to_baseline": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.5
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 2.0
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 3.0
+            }
+          ],
+          "ratio_basis": "heuristic",
+          "ratio_confidence": "low",
+          "ratio_note_uz": "2x doiraga nisbat umumiy amaliyotga mos (S2 qiymatni mashinaning o'z normasiga nisbatan baholaydi), aniq sonlar esa sizning qurilmangizda sinab sozlanishi kerak.",
+          "gear_sideband_pct_of_mesh": [
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 3.0
+            }
+          ],
+          "gear_sideband_source_ids": [
+            "S17"
+          ],
+          "gear_sideband_note_uz": "Mesh chastotasi yon polosasi amplitudasi markaziy mesh amplitudasining 3% idan oshsa chuqur tahlil signali (S17). Bu qiymat bitta patentdagi misol, o'z reduktoringizda sozlang."
+        },
+        "temperature": {
+          "source_ids": [
+            "S14",
+            "S15",
+            "S16",
+            "S18"
+          ],
+          "winding_abs_by_insulation_class": {
+            "B": {
+              "warning_C": 105,
+              "alarm_C": 120,
+              "critical_C": 130
+            },
+            "F": {
+              "warning_C": 130,
+              "alarm_C": 145,
+              "critical_C": 155
+            },
+            "H": {
+              "warning_C": 155,
+              "alarm_C": 170,
+              "critical_C": 180
+            }
+          },
+          "winding_basis": "standard_derived",
+          "winding_confidence": "medium",
+          "delta_over_baseline_K": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 8
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 25
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 40
+            }
+          ],
+          "delta_basis": "heuristic",
+          "delta_confidence": "low",
+          "rise_rate_K_per_min": [
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 2.0
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 5.0
+            }
+          ],
+          "rise_rate_basis": "heuristic",
+          "rise_rate_confidence": "low",
+          "note_uz": "Kichik DC motorda o'lchangan korpus harorati chulg'am issiq nuqtasidan past bo'ladi. Chulg'am chegaralarini to'g'ridan-to'g'ri korpus haroratiga qo'llash o'rniga, delta_over_baseline qoidasini asosiy qilib ishlating, abs chegaralarni esa chulg'am haroratini baholay olsangiz (qarshilik usuli) ishlating."
+        },
+        "current": {
+          "source_ids": [
+            "S7",
+            "S12"
+          ],
+          "ratio_to_rated": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.05
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.3
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 1.6
+            }
+          ],
+          "ratio_basis": "heuristic",
+          "ratio_confidence": "low",
+          "ratio_to_baseline_same_load": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.1
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.5
+            }
+          ],
+          "ripple_ratio_to_baseline": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.3
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.8
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 2.5
+            }
+          ],
+          "ripple_source_ids": [
+            "S6"
+          ],
+          "ripple_basis": "heuristic",
+          "ripple_confidence": "low",
+          "ripple_note_uz": "Cho'tka o'tish chastotasi = aylanish chastotasi x cho'tka (yoki kollektor segmenti) soni; masalan 2000 ayl/min va 4 cho'tka ushlagichida 133,33 Hz (S6). Shu chastotadagi amplituda trendini kuzating."
+        },
+        "power": {
+          "source_ids": [
+            "S16"
+          ],
+          "ratio_to_rated": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.05
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.3
+            }
+          ],
+          "ratio_to_baseline_same_load": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.1
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.5
+            }
+          ],
+          "basis": "heuristic",
+          "confidence": "low",
+          "note_uz": "Quvvat P = U x I. Mexanik chiqish quvvati o'zgarmagan holda kirish quvvati oshsa, yo'qotishlar (ishqalanish, issiqlik) oshgan."
+        }
+      }
+    },
+    {
+      "device_id": "DEV-ZAVOD-001",
+      "name": "Zavod: cho'tkali DC motor + ESP32 monitori",
+      "model": "to'ldiriladi",
+      "type": "dc_motor_brushed",
+      "has_gearbox": null,
+      "location_note": null,
+      "rated": {
+        "voltage_V": 6.0,
+        "current_A": null,
+        "power_W": null,
+        "speed_rpm": null,
+        "insulation_class": null,
+        "iso_vibration_class": null,
+        "gear_teeth_pinion": null,
+        "gear_teeth_wheel": null,
+        "brush_count": null,
+        "bearing_designation": null
+      },
+      "sensors": {
+        "vibration": "MPU-6050, ±4 g, DLPF 260 Hz, 256 namuna (~1 kHz) paketdan RMS, m/s^2",
+        "current": "ACS712-5A, ~60 ms o'rtacha (tok pulsatsiyasi/ripple o'lchanmaydi)",
+        "temperature": "DHT22: havo harorati (motor korpusi yoki chulg'am emas)",
+        "speed": null
+      },
+      "baseline": {
+        "learned": false,
+        "ambient_C": null,
+        "how_uz": "ESP32 da /baseline?load=idle|mid|rated&sec=1800 ni ishga tushiring; natija ESP32 xotirasiga (NVS) yoziladi. Shu fayldagi qiymatlar faqat hujjat uchun.",
+        "by_load": {
+          "idle": {
+            "vib_rms_m_s2": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            }
+          },
+          "mid": {
+            "vib_rms_m_s2": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            }
+          },
+          "rated": {
+            "vib_rms_m_s2": {
+              "mean": null,
+              "std": null
+            },
+            "temp_delta_K": {
+              "mean": null,
+              "std": null
+            },
+            "current_A": {
+              "mean": null,
+              "std": null
+            },
+            "power_W": {
+              "mean": null,
+              "std": null
+            }
+          }
+        }
+      },
+      "thresholds": {
+        "vibration": {
+          "source_ids": [
+            "S2",
+            "S3",
+            "S4"
+          ],
+          "iso_class_ref": "I",
+          "ratio_to_baseline": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.5
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 2.0
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 3.0
+            }
+          ],
+          "ratio_basis": "heuristic",
+          "ratio_confidence": "low",
+          "ratio_note_uz": "2x doiraga nisbat umumiy amaliyotga mos (S2 qiymatni mashinaning o'z normasiga nisbatan baholaydi), aniq sonlar esa sizning qurilmangizda sinab sozlanishi kerak.",
+          "iso_absolute_enabled": false,
+          "iso_absolute_reason_uz": "ISO 10816 mm/s ~15 kVt gacha mashinalar uchun; 6 V motor va MPU-6050 da mutlaq qiymat ma'nosiz. Faqat vib_ratio ishlatiladi."
+        },
+        "temperature": {
+          "source_ids": [
+            "S14",
+            "S15",
+            "S16",
+            "S18"
+          ],
+          "winding_basis": "standard_derived",
+          "winding_confidence": "medium",
+          "delta_over_baseline_K": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 8
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 25
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 40
+            }
+          ],
+          "delta_basis": "heuristic",
+          "delta_confidence": "low",
+          "rise_rate_K_per_min": [
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 2.0
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 5.0
+            }
+          ],
+          "rise_rate_basis": "heuristic",
+          "rise_rate_confidence": "low",
+          "note_uz": "Kichik DC motorda o'lchangan korpus harorati chulg'am issiq nuqtasidan past bo'ladi. Chulg'am chegaralarini to'g'ridan-to'g'ri korpus haroratiga qo'llash o'rniga, delta_over_baseline qoidasini asosiy qilib ishlating, abs chegaralarni esa chulg'am haroratini baholay olsangiz (qarshilik usuli) ishlating.",
+          "hard_abs_air_C": {
+            "critical": 65,
+            "basis": "heuristic",
+            "confidence": "low",
+            "note_uz": "DHT22 diapazoni -40..80 C. Motor korpusida NTC/DS18B20 qo'yilsa qayta belgilang."
+          },
+          "recommended_hardware_uz": "Motor korpusiga DS18B20/NTC, DHT22 ni atrof harorati uchun alohida qoldiring."
+        },
+        "current": {
+          "source_ids": [
+            "S7",
+            "S12"
+          ],
+          "ratio_to_rated": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.05
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.3
+            },
+            {
+              "level": "critical",
+              "op": ">=",
+              "value": 1.6
+            }
+          ],
+          "ratio_basis": "heuristic",
+          "ratio_confidence": "low",
+          "ratio_to_baseline_same_load": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.1
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.5
+            }
+          ],
+          "ripple_basis": "heuristic",
+          "ripple_confidence": "low",
+          "hard_ratio_alone_critical": 2.0,
+          "ripple_note_uz": "ACS712 o'rtacha tok o'lchaydi; cho'tka pulsatsiyasi uchun kamida 2-5 kHz tez ADC va FFT kerak (kelajakda)."
+        },
+        "power": {
+          "source_ids": [
+            "S16"
+          ],
+          "ratio_to_rated": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.05
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.15
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.3
+            }
+          ],
+          "ratio_to_baseline_same_load": [
+            {
+              "level": "watch",
+              "op": ">=",
+              "value": 1.1
+            },
+            {
+              "level": "warning",
+              "op": ">=",
+              "value": 1.25
+            },
+            {
+              "level": "alarm",
+              "op": ">=",
+              "value": 1.5
+            }
+          ],
+          "basis": "heuristic",
+          "confidence": "low",
+          "note_uz": "Quvvat P = U x I. Mexanik chiqish quvvati o'zgarmagan holda kirish quvvati oshsa, yo'qotishlar (ishqalanish, issiqlik) oshgan."
+        }
+      },
+      "features_measured": [
+        "vib_rms_m_s2",
+        "vib_ratio",
+        "temp_motor_C",
+        "temp_ambient_C",
+        "temp_delta_K",
+        "temp_rise_rate_K_per_min",
+        "current_A",
+        "current_ratio",
+        "current_ratio_same_load",
+        "power_W",
+        "power_ratio"
+      ],
+      "features_unavailable": [
+        "vib_dominant_order",
+        "vib_harmonics_count",
+        "vib_hf_ratio",
+        "vib_gear_sideband_pct",
+        "temp_bearing_C",
+        "temp_brush_C",
+        "temp_gearbox_C",
+        "current_ripple_pct",
+        "current_ripple_ratio",
+        "speed_ratio",
+        "voltage_V"
+      ]
+    }
+  ],
+  "fault_library": [
+    {
+      "id": "F01",
+      "component": "podshipnik",
+      "name_uz": "Podshipnik yeyilishi / shikastlanishi",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "yuqori chastotali tebranish va zarbalar o'sadi; spektrda BPFO/BPFI va ularning garmonikalari",
+        "temperature": "podshipnik joyida mahalliy harorat oshadi",
+        "current": "biroz oshishi mumkin (ishqalanish)",
+        "power": "biroz oshishi mumkin"
+      },
+      "signatures": {
+        "bearing_freq_formula": "BPFO=(N/2)*RPM_hz*(1-(d/D)cos(phi)); BPFI=(N/2)*RPM_hz*(1+(d/D)cos(phi))",
+        "note_uz": "N - sharchalar soni, d - shar diametri, D - o'rtacha (pitch) diametri, phi - kontakt burchagi. Podshipnik markasidan olinadi."
+      },
+      "probable_causes_uz": [
+        "moy yetishmasligi yoki ifloslanishi",
+        "haddan ortiq yuk",
+        "val o'qlari mos kelmasligi",
+        "uzoq muddatli eskirish"
+      ],
+      "consequences_uz": "Podshipnik va val shikastlanishi, motor qisilib qolishi, keyin g'ildirash yuzasi yemirilishi",
+      "recommended_action_uz": "Moylashni tekshiring, podshipnikni almashtirishni rejalashtiring; harorat tez o'ssa to'xtating.",
+      "max_level_single_signal": "warning",
+      "confidence": "high",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S9",
+        "S12"
+      ]
+    },
+    {
+      "id": "F02",
+      "component": "rotor/yakor + val",
+      "name_uz": "Nomutanosiblik (unbalance)",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "1x aylanish chastotasida radial tebranish kuchayadi",
+        "temperature": "odatda o'zgarmaydi yoki sekin oshadi",
+        "current": "odatda o'zgarmaydi",
+        "power": "o'zgarmaydi"
+      },
+      "probable_causes_uz": [
+        "yakorga yopishgan chang/yog'",
+        "bo'shashgan yoki tushib ketgan balans yuki",
+        "egilgan val",
+        "fan yoki shkivdagi nuqson"
+      ],
+      "consequences_uz": "Podshipniklar tezroq yeyiladi, mahkamlash bo'shashadi",
+      "recommended_action_uz": "Rotor/shkiv tozalash va balanslash, valni tekshirish.",
+      "max_level_single_signal": "warning",
+      "confidence": "high",
+      "source_ids": [
+        "S2",
+        "S5"
+      ]
+    },
+    {
+      "id": "F03",
+      "component": "mufta/val",
+      "name_uz": "Val o'qlari mos kelmasligi (misalignment)",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "2x aylanish chastotasida (va 1x da) tebranish; ko'pincha o'q yo'nalishida ham yuqori",
+        "temperature": "mufta va podshipnik atrofida harorat oshadi",
+        "current": "biroz oshishi mumkin",
+        "power": "biroz oshishi mumkin"
+      },
+      "probable_causes_uz": [
+        "montaj xatosi",
+        "poydevor bo'shashishi yoki cho'kishi",
+        "issiqlik kengayishi"
+      ],
+      "consequences_uz": "Mufta va podshipniklar yeyiladi, val charchaydi",
+      "recommended_action_uz": "O'qlarni lazer yoki soat indikatori bilan tekislang.",
+      "max_level_single_signal": "warning",
+      "confidence": "high",
+      "source_ids": [
+        "S2",
+        "S5"
+      ]
+    },
+    {
+      "id": "F04",
+      "component": "mahkamlash/poydevor",
+      "name_uz": "Mahkamlash bo'shashishi (looseness)",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "1x ning ko'p garmonikalari qatori, tartibsiz zarbalar, o'lchov yo'nalishiga bog'liq",
+        "temperature": "odatda o'zgarmaydi",
+        "current": "odatda o'zgarmaydi",
+        "power": "o'zgarmaydi"
+      },
+      "probable_causes_uz": [
+        "bolt bo'shashishi",
+        "poydevor yoki ramaning yorilishi",
+        "podshipnik o'rindig'i bo'shashishi"
+      ],
+      "consequences_uz": "Boshqa nuqsonlarni kuchaytiradi, mahkamlash joylari yemiriladi",
+      "recommended_action_uz": "Boltlar momentini tekshiring, poydevor va rama holatini ko'ring.",
+      "max_level_single_signal": "warning",
+      "confidence": "high",
+      "source_ids": [
+        "S2"
+      ]
+    },
+    {
+      "id": "F05",
+      "component": "cho'tka-kollektor uzeli",
+      "name_uz": "Cho'tka yeyilishi yoki kollektor nuqsoni",
+      "applies_to": [
+        "dc_motor_brushed"
+      ],
+      "symptoms": {
+        "vibration": "o'rtacha oshadi, shovqin ko'payadi",
+        "temperature": "cho'tka/kollektor atrofida harorat sekin oshadi (kollektorda uglerod qatlami bo'lsa harorat profili farq qiladi)",
+        "current": "cho'tka o'tish chastotasida tok pulsatsiyasi kuchayadi",
+        "power": "biroz tebranadi yoki oshadi"
+      },
+      "probable_causes_uz": [
+        "cho'tka uzunligi kamayganligi",
+        "kollektorda uglerod qatlami yoki oksid",
+        "pruzhina bosimi pasayishi",
+        "kollektor plastinkalari orasida nuqson"
+      ],
+      "consequences_uz": "Uchqunlanish, yakor kollektorining yemirilishi, motor quvvati pasayishi",
+      "recommended_action_uz": "Cho'tkalarni uzunlik bo'yicha tekshiring, kollektorni tozalang, kerak bo'lsa cho'tka almashtiring.",
+      "max_level_single_signal": "warning",
+      "confidence": "medium",
+      "source_ids": [
+        "S6",
+        "S8",
+        "S9",
+        "S12",
+        "S13",
+        "S19"
+      ]
+    },
+    {
+      "id": "F06",
+      "component": "yakor chulg'ami",
+      "name_uz": "Yakor chulg'ami qisqa tutashuvi / izolyatsiya buzilishi",
+      "applies_to": [
+        "dc_motor_brushed"
+      ],
+      "symptoms": {
+        "vibration": "o'zgarishi mumkin (nosimmetriya hisobiga)",
+        "temperature": "chulg'am tez isiydi, harorat keskin o'sadi",
+        "current": "o'rtacha tok yuk o'zgarmagan holda oshadi; pulsatsiya ham o'zgaradi",
+        "power": "oshadi"
+      },
+      "probable_causes_uz": [
+        "izolyatsiya issiqlik tufayli eskirgan",
+        "uzoq vaqt haddan ortiq yuk bilan ishlagan",
+        "namlik yoki ifloslanish"
+      ],
+      "consequences_uz": "Chulg'am kuyishi, motorning to'liq ishdan chiqishi",
+      "recommended_action_uz": "Motorni to'xtating, chulg'am qarshiligi va izolyatsiyani o'lchang, yakorni ta'mirlash yoki almashtirish.",
+      "max_level_single_signal": "warning",
+      "confidence": "medium",
+      "source_ids": [
+        "S7",
+        "S12",
+        "S13",
+        "S18"
+      ]
+    },
+    {
+      "id": "F07",
+      "component": "mexanik yuklama / stanok qismi",
+      "name_uz": "Tiqilib qolish (jam) yoki bloklangan rotor",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "keskin o'zgaradi (to'satdan oshadi yoki, rotor to'liq to'xtasa, pasayadi)",
+        "temperature": "tez o'sadi (daqiqalar ichida)",
+        "current": "keskin oshadi (to'xtab qolgan rotor tokiga yaqinlashadi)",
+        "power": "keskin oshadi, mexanik chiqish yo'qoladi"
+      },
+      "probable_causes_uz": [
+        "stanokning harakatlanuvchi qismida jism tiqilib qolgan",
+        "yetarli moylanmagan yo'naltiruvchi",
+        "reduktor yoki podshipnik qisilgan",
+        "chiqish vali haddan ortiq yuklangan"
+      ],
+      "consequences_uz": "Chulg'am kuyishi, reduktor tishlari sinishi, sensorlar/drayver shikastlanishi",
+      "recommended_action_uz": "Darhol o'chiring, mexanik qismni qo'lda aylantirib tiqilgan joyni toping.",
+      "max_level_single_signal": "alarm",
+      "confidence": "medium",
+      "source_ids": [
+        "S7",
+        "S12"
+      ]
+    },
+    {
+      "id": "F08",
+      "component": "reduktor tishli uzatmasi",
+      "name_uz": "Reduktor tishlarining yeyilishi yoki nuqsoni",
+      "applies_to": [
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "mesh chastotasi va uning garmonikalari atrofida yon polosalar soni va amplitudasi o'sadi",
+        "temperature": "reduktor korpusi harorati oshadi",
+        "current": "tok spektrida mesh chastotasi atrofida yon polosalar o'sadi",
+        "power": "biroz oshadi"
+      },
+      "probable_causes_uz": [
+        "tish yuzasining notekis yeyilishi (pitting, spalling)",
+        "tish yoriq yoki sinish",
+        "moy yetishmasligi yoki ifloslanishi",
+        "reduktor yuklanishi haddan ortiq"
+      ],
+      "consequences_uz": "Tishlar sinishi, reduktor qisilib qolishi, shovqin va tebranish oshishi",
+      "recommended_action_uz": "Moy holati va darajasini tekshiring, moyda metall zarrachalar bo'lsa reduktorni oching, tishlar holatini ko'ring.",
+      "max_level_single_signal": "warning",
+      "confidence": "medium",
+      "source_ids": [
+        "S10",
+        "S11",
+        "S17"
+      ]
+    },
+    {
+      "id": "F09",
+      "component": "yuritma tizimi (umumiy yuk)",
+      "name_uz": "Doimiy ortiqcha yuklama",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "odatda normal yoki biroz oshadi",
+        "temperature": "vaqt o'tishi bilan sekin va barqaror oshadi",
+        "current": "nominaldan yuqori",
+        "power": "nominaldan yuqori"
+      },
+      "probable_causes_uz": [
+        "stanok rejimi motor uchun og'ir",
+        "kesish yoki uzatish parametrlari noto'g'ri",
+        "qo'shimcha ishqalanish"
+      ],
+      "consequences_uz": "Chulg'am izolyatsiyasi tezroq eskiradi (harorat har 10 C da eskirish taxminan 2 baravar tezlashadi)",
+      "recommended_action_uz": "Yukni kamaytiring yoki kuchliroq motor tanlang; ishlash rejimini tekshiring.",
+      "max_level_single_signal": "warning",
+      "confidence": "medium",
+      "source_ids": [
+        "S18",
+        "S14"
+      ]
+    },
+    {
+      "id": "F10",
+      "component": "sovutish / moylash",
+      "name_uz": "Sovutish yoki moylash yetishmasligi",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "o'zgarmasligi yoki biroz oshishi mumkin",
+        "temperature": "tok o'zgarmagan holda harorat ko'tariladi",
+        "current": "me'yorda",
+        "power": "me'yorda yoki biroz yuqori"
+      },
+      "probable_causes_uz": [
+        "ventilyator ishlamayapti yoki to'sib qo'yilgan",
+        "chang bilan to'lgan sovutish kanallari",
+        "moy kam yoki eskirgan",
+        "atrof harorati ko'tarilgan"
+      ],
+      "consequences_uz": "Izolyatsiya va podshipnik moyi tez eskiradi",
+      "recommended_action_uz": "Sovutish yo'llarini tozalang, ventilyatorni tekshiring, moyni almashtiring; avval atrof harorati ko'tarilmaganini tekshiring.",
+      "max_level_single_signal": "warning",
+      "confidence": "low",
+      "source_ids": [
+        "S16",
+        "S14"
+      ]
+    },
+    {
+      "id": "F11",
+      "component": "doimiy magnitlar / maydon",
+      "name_uz": "Magnit oqimi yo'qolishi yoki magnit siljishi",
+      "applies_to": [
+        "dc_motor_brushed"
+      ],
+      "symptoms": {
+        "vibration": "o'zgarishi mumkin",
+        "temperature": "yuk bilan bog'liq o'zgarish",
+        "current": "bir xil moment uchun tok oshadi",
+        "power": "o'zgarishi mumkin"
+      },
+      "probable_causes_uz": [
+        "magnit issiqlikdan kuchsizlanishi",
+        "magnit siljishi yoki ajralishi",
+        "mexanik zarba"
+      ],
+      "consequences_uz": "Moment pasayadi, tok oshadi, qizish kuchayadi",
+      "recommended_action_uz": "Motorni ajrating va magnitlarni tekshiring, kerak bo'lsa motorni almashtiring.",
+      "max_level_single_signal": "watch",
+      "confidence": "low",
+      "source_ids": [
+        "S12",
+        "S13"
+      ]
+    },
+    {
+      "id": "F12",
+      "component": "tasma yoki tashqi uzatma",
+      "name_uz": "Tasma orqali uzatilgan tebranish (soxta nosozlik)",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "tebranish motorda katta, lekin chastotasi boshqa (masalan ventilyator/mexanizm) valiga mos keladi",
+        "temperature": "o'zgarmaydi",
+        "current": "o'zgarmaydi",
+        "power": "o'zgarmaydi"
+      },
+      "probable_causes_uz": [
+        "tasma tarangligi noto'g'ri",
+        "qo'shni mexanizmning o'z nuqsoni"
+      ],
+      "consequences_uz": "Motor emas, boshqa uzel shikastlanayotgan bo'lishi mumkin",
+      "recommended_action_uz": "Avval tebranish chastotasini mexanizm valining chastotasi bilan solishtiring; motorni ta'mirlashdan oldin tasma va qo'shni uzelni tekshiring.",
+      "max_level_single_signal": "watch",
+      "confidence": "medium",
+      "source_ids": [
+        "S5"
+      ]
+    },
+    {
+      "id": "F13",
+      "component": "o'lchov tizimi",
+      "name_uz": "Sensor yoki o'lchov nosozligi",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "NaN, qotib qolgan yoki 0 qiymat",
+        "temperature": "NaN (DHT22 javob bermaydi) yoki sakrash",
+        "current": "ADC to'yingan yoki 0 ga yopishgan, nol nuqta siljigan",
+        "power": "tokka bog'liq, noto'g'ri"
+      },
+      "probable_causes_uz": [
+        "sim uzilishi, I2C xatosi",
+        "ACS712 nol nuqtasining siljishi",
+        "DHT22 ni juda tez o'qish",
+        "ta'minot shovqini"
+      ],
+      "consequences_uz": "Soxta alarm yoki haqiqiy nosozlikni o'tkazib yuborish",
+      "recommended_action_uz": "Simlarni va I2C manzilini tekshiring, nol kalibrlashni qayta bajaring.",
+      "max_level_single_signal": "watch",
+      "confidence": "medium",
+      "basis": "engineering_judgement",
+      "source_ids": []
+    },
+    {
+      "id": "F14",
+      "component": "ta'minot manbai",
+      "name_uz": "Ta'minot kuchlanishi pasayishi / o'zgarishi",
+      "applies_to": [
+        "dc_motor_brushed",
+        "gearbox"
+      ],
+      "symptoms": {
+        "vibration": "o'zgarmaydi yoki tezlik pasayishi bilan kamayadi",
+        "temperature": "o'zgarmaydi",
+        "current": "yuk bir xil bo'lsa ham o'zgaradi",
+        "power": "V doimiy 6 V deb hisoblangani uchun noto'g'ri chiqadi"
+      },
+      "probable_causes_uz": [
+        "batareya zaryadi tugashi",
+        "manba quvvati yetmasligi",
+        "kontaktlarda kuchlanish tushishi"
+      ],
+      "consequences_uz": "Tezlik va moment pasayadi, quvvat hisobi noto'g'ri bo'ladi",
+      "recommended_action_uz": "Kuchlanishni o'lchang (ADC bo'luvchi yoki INA219), manbani tekshiring.",
+      "max_level_single_signal": "watch",
+      "confidence": "low",
+      "basis": "engineering_judgement",
+      "source_ids": []
+    }
+  ],
+  "alert_rules": [
+    {
+      "id": "R01",
+      "name_uz": "Qisilib qolish / bloklanish",
+      "level": "critical",
+      "all_of": [
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.6
+        }
+      ],
+      "any_of": [
+        {
+          "param": "temp_rise_rate_K_per_min",
+          "op": ">=",
+          "value": 5.0
+        },
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 2.0
+        },
+        {
+          "param": "speed_ratio",
+          "op": "<=",
+          "value": 0.5
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F07",
+          "weight": 0.7
+        },
+        {
+          "fault_id": "F06",
+          "weight": 0.2
+        },
+        {
+          "fault_id": "F09",
+          "weight": 0.1
+        }
+      ],
+      "message_uz": "KRITIK: tok keskin oshdi, rotor tiqilib qolgan bo'lishi mumkin. Stanokning harakatlanuvchi qismida jism tiqilgan yoki reduktor/podshipnik qisilgan bo'lishi mumkin.",
+      "action": "auto_stop",
+      "confidence": "medium",
+      "source_ids": [
+        "S7",
+        "S12"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "partial",
+        "missing_params": [
+          "speed_ratio"
+        ]
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R02",
+      "name_uz": "Podshipnik muammosi",
+      "level": "alarm",
+      "all_of": [
+        {
+          "param": "vib_hf_ratio",
+          "op": ">=",
+          "value": 2.0
+        },
+        {
+          "param": "temp_bearing_delta_K",
+          "op": ">=",
+          "value": 15
+        }
+      ],
+      "any_of": [
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.1
+        },
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.5
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F01",
+          "weight": 0.75
+        },
+        {
+          "fault_id": "F03",
+          "weight": 0.15
+        },
+        {
+          "fault_id": "F10",
+          "weight": 0.1
+        }
+      ],
+      "message_uz": "Podshipnikda muammo ehtimoli yuqori: yuqori chastotali tebranish va podshipnik harorati birgalikda oshdi. Moylash va yeyilishni tekshiring.",
+      "action": "reduce_load_and_inspect",
+      "confidence": "medium",
+      "source_ids": [
+        "S1",
+        "S2",
+        "S9"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "temp_bearing_delta_K",
+          "vib_hf_ratio"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R03",
+      "name_uz": "Faqat tebranish oshdi (1x)",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.5
+        },
+        {
+          "param": "vib_dominant_order",
+          "op": "==",
+          "value": 1
+        }
+      ],
+      "none_of": [
+        {
+          "param": "temp_delta_K",
+          "op": ">=",
+          "value": 15
+        },
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.15
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F02",
+          "weight": 0.6
+        },
+        {
+          "fault_id": "F04",
+          "weight": 0.2
+        },
+        {
+          "fault_id": "F12",
+          "weight": 0.2
+        }
+      ],
+      "message_uz": "Tebranish 1x aylanish chastotasida oshdi: rotor/shkiv nomutanosibligi ehtimoli. Rotor va shkivni tozalang va tekshiring.",
+      "action": "schedule_inspection",
+      "confidence": "medium",
+      "source_ids": [
+        "S2",
+        "S5"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "vib_dominant_order"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R04",
+      "name_uz": "Tebranish 2x oshdi",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.5
+        },
+        {
+          "param": "vib_dominant_order",
+          "op": "==",
+          "value": 2
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F03",
+          "weight": 0.7
+        },
+        {
+          "fault_id": "F04",
+          "weight": 0.2
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.1
+        }
+      ],
+      "message_uz": "Tebranish 2x chastotada oshdi: val o'qlari mos kelmasligi ehtimoli. Mufta va o'q tekisligini tekshiring.",
+      "action": "schedule_inspection",
+      "confidence": "medium",
+      "source_ids": [
+        "S2",
+        "S5"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "vib_dominant_order"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R05",
+      "name_uz": "Bo'shashish belgisi",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.5
+        },
+        {
+          "param": "vib_harmonics_count",
+          "op": ">=",
+          "value": 4
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F04",
+          "weight": 0.7
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.3
+        }
+      ],
+      "message_uz": "Tebranish spektrida ko'p garmonikalar bor: mahkamlash bo'shashgan yoki podshipnik o'rindig'i bo'sh bo'lishi mumkin.",
+      "action": "schedule_inspection",
+      "confidence": "medium",
+      "source_ids": [
+        "S2"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "vib_harmonics_count"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R06",
+      "name_uz": "Cho'tka-kollektor muammosi",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "current_ripple_ratio",
+          "op": ">=",
+          "value": 1.8
+        }
+      ],
+      "any_of": [
+        {
+          "param": "temp_brush_delta_K",
+          "op": ">=",
+          "value": 10
+        },
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.3
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F05",
+          "weight": 0.65
+        },
+        {
+          "fault_id": "F06",
+          "weight": 0.3
+        },
+        {
+          "fault_id": "F11",
+          "weight": 0.05
+        }
+      ],
+      "message_uz": "Tok pulsatsiyasi cho'tka o'tish chastotasida oshdi: cho'tka yeyilishi yoki kollektor nuqsoni ehtimoli. Cho'tka uzunligini va kollektor yuzasini tekshiring.",
+      "action": "schedule_inspection",
+      "confidence": "medium",
+      "source_ids": [
+        "S6",
+        "S8",
+        "S9"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "current_ripple_ratio",
+          "temp_brush_delta_K"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R07",
+      "name_uz": "Chulg'am qisqa tutashuvi ehtimoli",
+      "level": "alarm",
+      "all_of": [
+        {
+          "param": "temp_delta_K",
+          "op": ">=",
+          "value": 25
+        },
+        {
+          "param": "current_ratio_same_load",
+          "op": ">=",
+          "value": 1.25
+        }
+      ],
+      "none_of": [
+        {
+          "param": "vib_hf_ratio",
+          "op": ">=",
+          "value": 2.0
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F06",
+          "weight": 0.55
+        },
+        {
+          "fault_id": "F09",
+          "weight": 0.25
+        },
+        {
+          "fault_id": "F07",
+          "weight": 0.2
+        }
+      ],
+      "message_uz": "Yuk o'zgarmagan holda tok va harorat ko'tarildi: yakor chulg'amida qisqa tutashuv yoki izolyatsiya muammosi ehtimoli. Motorni to'xtatib chulg'am qarshiligini tekshiring.",
+      "action": "reduce_load_and_inspect",
+      "confidence": "medium",
+      "source_ids": [
+        "S7",
+        "S12",
+        "S18"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "partial",
+        "missing_params": [
+          "vib_hf_ratio"
+        ]
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R08",
+      "name_uz": "Ortiqcha yuklama",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.15
+        },
+        {
+          "param": "power_ratio",
+          "op": ">=",
+          "value": 1.15
+        }
+      ],
+      "none_of": [
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 2.0
+        },
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.6
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F09",
+          "weight": 0.6
+        },
+        {
+          "fault_id": "F07",
+          "weight": 0.2
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.2
+        }
+      ],
+      "message_uz": "Tok va quvvat nominaldan oshdi: motor ortiqcha yuk bilan ishlayapti. Stanok rejimini yoki yuk darajasini tekshiring.",
+      "action": "reduce_load",
+      "confidence": "medium",
+      "source_ids": [
+        "S14",
+        "S18"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "full",
+        "missing_params": []
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R09",
+      "name_uz": "Sovutish/moylash muammosi",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "temp_delta_K",
+          "op": ">=",
+          "value": 15
+        }
+      ],
+      "none_of": [
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.15
+        },
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.5
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F10",
+          "weight": 0.6
+        },
+        {
+          "fault_id": "F05",
+          "weight": 0.2
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.2
+        }
+      ],
+      "message_uz": "Faqat harorat oshdi, tok va tebranish me'yorda: sovutish yoki moylash yetishmasligi yoki atrof harorati ko'tarilgan bo'lishi mumkin. Avval atrof haroratini tekshiring.",
+      "action": "schedule_inspection",
+      "confidence": "low",
+      "source_ids": [
+        "S16"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "full",
+        "missing_params": []
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R10",
+      "name_uz": "Reduktor tishlari yeyilishi",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "vib_gear_sideband_pct",
+          "op": ">=",
+          "value": 3.0
+        }
+      ],
+      "any_of": [
+        {
+          "param": "temp_gearbox_delta_K",
+          "op": ">=",
+          "value": 10
+        },
+        {
+          "param": "current_sideband_ratio",
+          "op": ">=",
+          "value": 1.5
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F08",
+          "weight": 0.7
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.15
+        },
+        {
+          "fault_id": "F10",
+          "weight": 0.15
+        }
+      ],
+      "message_uz": "Reduktor mesh chastotasi atrofida yon polosalar oshdi: tish yeyilishi yoki nuqson ehtimoli. Moy holatini tekshiring.",
+      "action": "schedule_inspection",
+      "confidence": "low",
+      "source_ids": [
+        "S10",
+        "S11",
+        "S17"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "current_sideband_ratio",
+          "temp_gearbox_delta_K",
+          "vib_gear_sideband_pct"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R11",
+      "name_uz": "Barcha parametr birdan oshdi",
+      "level": "alarm",
+      "all_of": [
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 2.0
+        },
+        {
+          "param": "temp_delta_K",
+          "op": ">=",
+          "value": 25
+        },
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.3
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F07",
+          "weight": 0.4
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.3
+        },
+        {
+          "fault_id": "F08",
+          "weight": 0.15
+        },
+        {
+          "fault_id": "F06",
+          "weight": 0.15
+        }
+      ],
+      "message_uz": "Tebranish, harorat va tok birdan oshdi: jiddiy mexanik muammo (qisilish, podshipnik yoki reduktor) bo'lishi mumkin. Qurilmani to'xtating.",
+      "action": "auto_stop",
+      "confidence": "medium",
+      "source_ids": [
+        "S16"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "full",
+        "missing_params": []
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R12",
+      "name_uz": "ISO tebranish zonasi D",
+      "level": "alarm",
+      "all_of": [
+        {
+          "param": "vib_rms_mm_s",
+          "op": ">=",
+          "value": "ISO_CLASS_C_D"
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F01",
+          "weight": 0.35
+        },
+        {
+          "fault_id": "F02",
+          "weight": 0.25
+        },
+        {
+          "fault_id": "F03",
+          "weight": 0.2
+        },
+        {
+          "fault_id": "F04",
+          "weight": 0.2
+        }
+      ],
+      "message_uz": "Tebranish ISO bo'yicha xavfli zonaga (D) yetdi. Mashinaga zarar yetishi mumkin; spektr bo'yicha aniq sababni aniqlang.",
+      "action": "reduce_load_and_inspect",
+      "confidence": "high",
+      "source_ids": [
+        "S3",
+        "S4"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "unavailable",
+        "missing_params": [
+          "vib_rms_mm_s"
+        ]
+      },
+      "edge_implemented": false
+    },
+    {
+      "id": "R13",
+      "name_uz": "Faqat tebranish oshdi (spektrsiz)",
+      "level": "warning",
+      "all_of": [
+        {
+          "param": "vib_ratio",
+          "op": ">=",
+          "value": 1.5
+        }
+      ],
+      "none_of": [
+        {
+          "param": "temp_delta_K",
+          "op": ">=",
+          "value": 15
+        },
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 1.15
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F02",
+          "weight": 0.35
+        },
+        {
+          "fault_id": "F04",
+          "weight": 0.25
+        },
+        {
+          "fault_id": "F03",
+          "weight": 0.15
+        },
+        {
+          "fault_id": "F01",
+          "weight": 0.15
+        },
+        {
+          "fault_id": "F12",
+          "weight": 0.1
+        }
+      ],
+      "message_uz": "Tebranish baza chizig'idan oshdi, lekin harorat va tok me'yorda. Chastota (1x/2x) o'lchanmagani uchun sabab aniq emas: nomutanosiblik, bo'shashgan mahkamlash yoki val mos kelmasligi bo'lishi mumkin.",
+      "action": "schedule_inspection",
+      "confidence": "low",
+      "source_ids": [
+        "S2",
+        "S5"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "full",
+        "missing_params": []
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R14",
+      "name_uz": "Sensor nosozligi",
+      "level": "watch",
+      "all_of": [
+        {
+          "param": "sensor_ok",
+          "op": "==",
+          "value": false
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F13",
+          "weight": 0.9
+        },
+        {
+          "fault_id": "F14",
+          "weight": 0.1
+        }
+      ],
+      "message_uz": "Datchik ma'lumoti ishonchsiz (MPU-6050 yo'q, DHT22 NaN yoki ACS712 to'yingan). Boshqa qoidalar natijasiga ehtiyot bo'ling.",
+      "action": "check_sensors",
+      "confidence": "medium",
+      "source_ids": [],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "full",
+        "missing_params": []
+      },
+      "edge_implemented": true
+    },
+    {
+      "id": "R15",
+      "name_uz": "Qattiq xavfsizlik chegarasi",
+      "level": "critical",
+      "any_of": [
+        {
+          "param": "current_ratio",
+          "op": ">=",
+          "value": 2.0
+        },
+        {
+          "param": "temp_motor_C",
+          "op": ">=",
+          "value": 65
+        }
+      ],
+      "fault_ranking": [
+        {
+          "fault_id": "F07",
+          "weight": 0.5
+        },
+        {
+          "fault_id": "F09",
+          "weight": 0.25
+        },
+        {
+          "fault_id": "F06",
+          "weight": 0.25
+        }
+      ],
+      "message_uz": "Tok yoki harorat mutlaq xavfsizlik chegarasidan o'tdi. Qurilma to'xtatilishi kerak.",
+      "action": "auto_stop",
+      "confidence": "low",
+      "basis": "heuristic",
+      "note_uz": "Yagona signal bilan kritik: bu mutlaq chegara (baza chizig'i kerak emas). 65 C DHT22 havo harorati uchun boshlang'ich taxmin.",
+      "source_ids": [
+        "S7",
+        "S12"
+      ],
+      "hardware_support_DEV_ZAVOD_001": {
+        "status": "full",
+        "missing_params": []
+      },
+      "edge_implemented": true
+    }
+  ],
+  "rule_variables_note_uz": "c.value 'ISO_CLASS_C_D' bo'lsa, qurilma profilidagi iso_class_ref sinfining C/D chegarasi (standards.iso_10816_vibration.classes) qo'yiladi. *_delta_K = o'lchangan harorat minus baseline harorat (shu nuqta uchun). current_ratio_same_load = joriy tok / shu yukdagi baseline tok.",
+  "validation_datasets_uz": [
+    {
+      "source_id": "S19",
+      "use": "arzon DC motorlarda kollektor, chulg'am va cho'tka yeyilishi bilan real o'lchovlar; qoidalaringizni tekshirish uchun"
+    },
+    {
+      "source_id": "S20",
+      "use": "PMSM stator qisqa tutashuvi tebranish va tok ma'lumotlari; faqat taqqoslash uchun (DC emas)"
+    }
+  ],
+  "gemini_context": {
+    "role_uz": "Siz sanoat qurilmalari uchun diagnostika yordamchisisiz. Sizga qurilma profili, baza chizig'i, hozirgi o'lchovlar va ishga tushgan qoidalar beriladi.",
+    "input_contract": {
+      "required": [
+        "device_id",
+        "timestamp",
+        "features_now",
+        "triggered_rule_ids"
+      ],
+      "features_now_keys": [
+        "vib_ratio",
+        "vib_dominant_order",
+        "vib_harmonics_count",
+        "vib_hf_ratio",
+        "vib_gear_sideband_pct",
+        "temp_motor_C",
+        "temp_bearing_C",
+        "temp_brush_C",
+        "temp_gearbox_C",
+        "temp_ambient_C",
+        "temp_delta_K",
+        "temp_rise_rate_K_per_min",
+        "current_A",
+        "current_ratio",
+        "current_ripple_pct",
+        "current_ripple_ratio",
+        "power_W",
+        "power_ratio",
+        "speed_ratio",
+        "vib_rms_m_s2",
+        "current_ratio_same_load"
+      ]
+    },
+    "output_contract_json": {
+      "summary_uz": "1-2 jumla",
+      "ranked_causes": [
+        {
+          "fault_id": "F..",
+          "probability_pct": 0,
+          "evidence_uz": "qaysi parametrlar sababli"
+        }
+      ],
+      "affected_components_uz": [
+        "..."
+      ],
+      "recommended_actions_uz": [
+        "..."
+      ],
+      "confidence": "low|medium|high",
+      "missing_data_uz": "yetishmayotgan o'lchovlar"
+    },
+    "rules_uz": [
+      "Faqat berilgan fault_library ichidan sabab tanlang.",
+      "Har bir sabab uchun qaysi parametrlar dalil ekanini yozing.",
+      "Ma'lumot yetarli bo'lmasa, 'confidence: low' deb yozing va qo'shimcha o'lchov so'rang.",
+      "Kritik to'xtatish qarorini o'zingiz qabul qilmang, bu .ino qoidalari bilan bajariladi.",
+      "Javob faqat JSON formatida bo'lsin.",
+      "features_now ichida null bo'lgan qiymat o'lchanmagan: uni o'ylab topmang, missing_data_uz ga yozing.",
+      "Tebranish m/s^2 da (mm/s emas); ISO zonasi bu qurilmaga qo'llanmaydi.",
+      "triggered_rule_ids bo'sh bo'lsa tahlil qilmang (edge buni o'zi hal qiladi).",
+      "Sabablar ehtimoliy; 'aniq' yoki 'albatta' deb yozmang."
+    ]
+  },
+  "open_datasets_to_harvest": [
+    {
+      "name": "CWRU Bearing Data Center (Case Western Reserve Univ.)",
+      "use_uz": "podshipnik nuqsonlari tebranish signallari; vib_hf_ratio va BPFO/BPFI qoidalarini sinash",
+      "limit_uz": "AC motor, laboratoriya sharoiti; DC va arzon MPU uchun chegara sifatida emas, usulni tekshirish uchun",
+      "verify_link": true
+    },
+    {
+      "name": "Paderborn University (KAt) Bearing DataCenter",
+      "use_uz": "real va sun'iy shikastlangan podshipniklar, tok + tebranish",
+      "limit_uz": "AC motor; tok imzosi tahlili uchun foydali",
+      "verify_link": true
+    },
+    {
+      "name": "NASA IMS / PCoE Bearing Data",
+      "use_uz": "podshipnikning ishdan chiqquncha uzoq muddatli yeyilish trendi (RUL, trend qoidalari)",
+      "limit_uz": "yuqori tezlikli sanoat podshipnigi",
+      "verify_link": true
+    },
+    {
+      "name": "MFPT Society fault data sets",
+      "use_uz": "podshipnik nuqson chastotalarini tekshirish",
+      "limit_uz": "kam yozuv",
+      "verify_link": true
+    },
+    {
+      "name": "XJTU-SY bearing run-to-failure",
+      "use_uz": "yeyilish trendi va hayot davri",
+      "limit_uz": "AC/podshipnik",
+      "verify_link": true
+    },
+    {
+      "name": "S19 (CARTIF, ADCAIJ 2020) arzon DC motor nuqsonlari",
+      "use_uz": "sizning motoringizga eng yaqin: kollektor, chulg'am, cho'tka",
+      "limit_uz": "datchiklari sizning MPU/ACS dan farq qiladi",
+      "verify_link": false
+    }
+  ],
+  "open_datasets_note_uz": "Havolalarni yuklab olishdan oldin o'zingiz tekshiring (verify_link=true). Bu datasetlar usulni tekshirish uchun; chegara qiymatlari baribir O'Z motoringiz o'lchovidan olinadi.",
+  "synthetic_scenarios": {
+    "note_uz": "Bu o'lchangan emas, muallif yozgan sintetik misollar: Gemini few-shot va qoidalarni (ESP32 va Node) sinash uchun. O'z o'lchovlaringiz yig'ilgach almashtiring.",
+    "items": [
+      {
+        "id": "T01",
+        "title_uz": "Normal ish",
+        "features_now": {
+          "vib_ratio": 1.0,
+          "temp_delta_K": 0.0,
+          "temp_rise_rate_K_per_min": 0.1,
+          "current_ratio": 0.95,
+          "current_ratio_same_load": 1.0,
+          "power_ratio": 0.95
+        },
+        "triggered_rule_ids": [],
+        "expected": {
+          "level": "normal",
+          "top_fault_ids": []
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T02",
+        "title_uz": "Rotor qisilishi",
+        "features_now": {
+          "vib_ratio": 2.4,
+          "temp_delta_K": 0.0,
+          "temp_rise_rate_K_per_min": 6.2,
+          "current_ratio": 1.8,
+          "current_ratio_same_load": 1.9,
+          "power_ratio": 1.8
+        },
+        "triggered_rule_ids": [
+          "R01"
+        ],
+        "expected": {
+          "level": "critical",
+          "top_fault_ids": [
+            "F07",
+            "F06"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T03",
+        "title_uz": "Ortiqcha yuklama",
+        "features_now": {
+          "vib_ratio": 1.1,
+          "temp_delta_K": 12,
+          "temp_rise_rate_K_per_min": 0.1,
+          "current_ratio": 1.22,
+          "current_ratio_same_load": 1.22,
+          "power_ratio": 1.22
+        },
+        "triggered_rule_ids": [
+          "R08"
+        ],
+        "expected": {
+          "level": "warning",
+          "top_fault_ids": [
+            "F09"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T04",
+        "title_uz": "Faqat tebranish",
+        "features_now": {
+          "vib_ratio": 1.7,
+          "temp_delta_K": 0.0,
+          "temp_rise_rate_K_per_min": 0.1,
+          "current_ratio": 0.95,
+          "current_ratio_same_load": 1.0,
+          "power_ratio": 0.95
+        },
+        "triggered_rule_ids": [
+          "R13"
+        ],
+        "expected": {
+          "level": "warning",
+          "top_fault_ids": [
+            "F02",
+            "F04"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T05",
+        "title_uz": "Faqat harorat",
+        "features_now": {
+          "vib_ratio": 1.0,
+          "temp_delta_K": 18,
+          "temp_rise_rate_K_per_min": 0.1,
+          "current_ratio": 0.95,
+          "current_ratio_same_load": 1.0,
+          "power_ratio": 0.95
+        },
+        "triggered_rule_ids": [
+          "R09"
+        ],
+        "expected": {
+          "level": "warning",
+          "top_fault_ids": [
+            "F10"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T06",
+        "title_uz": "Chulg'am qisqa tutashuvi",
+        "features_now": {
+          "vib_ratio": 1.1,
+          "temp_delta_K": 28,
+          "temp_rise_rate_K_per_min": 0.1,
+          "current_ratio": 1.0,
+          "current_ratio_same_load": 1.32,
+          "power_ratio": 0.95
+        },
+        "triggered_rule_ids": [
+          "R07"
+        ],
+        "expected": {
+          "level": "alarm",
+          "top_fault_ids": [
+            "F06"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T07",
+        "title_uz": "Hammasi birdan oshdi",
+        "features_now": {
+          "vib_ratio": 2.2,
+          "temp_delta_K": 27,
+          "temp_rise_rate_K_per_min": 0.1,
+          "current_ratio": 1.35,
+          "current_ratio_same_load": 1.4,
+          "power_ratio": 1.35
+        },
+        "triggered_rule_ids": [
+          "R11",
+          "R08"
+        ],
+        "expected": {
+          "level": "alarm",
+          "top_fault_ids": [
+            "F07",
+            "F01"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      },
+      {
+        "id": "T08",
+        "title_uz": "DHT22 uzilgan",
+        "features_now": {
+          "vib_ratio": 1.0,
+          "temp_motor_C": null,
+          "temp_delta_K": null,
+          "current_ratio": 0.95
+        },
+        "triggered_rule_ids": [
+          "R14"
+        ],
+        "expected": {
+          "level": "watch",
+          "top_fault_ids": [
+            "F13"
+          ]
+        },
+        "synthetic": true,
+        "basis": "expert_authored"
+      }
+    ]
+  },
+  "data_collection_plan": {
+    "goal_uz": "Chegaralarni adabiyotdan emas, o'z motoringizda nuqsonni ataylab (xavfsiz, kichik darajada) hosil qilib o'lchash orqali topish.",
+    "csv_columns": [
+      "t_s",
+      "session_id",
+      "label",
+      "load_mode",
+      "vib_rms_m_s2",
+      "temp_C",
+      "ambient_C",
+      "current_A",
+      "power_W",
+      "notes"
+    ],
+    "sampling_uz": "Har 2 s da /json dan olish; har sinf uchun kamida 10 daqiqa, kamida 3 ta alohida sessiya.",
+    "split_uz": "Train/test ni qatorlar bo'yicha EMAS, sessiyalar bo'yicha bo'ling (aks holda natija soxta yaxshi chiqadi).",
+    "safety_uz": [
+      "Tok cheklangan laboratoriya manbai ishlating.",
+      "Harorat 60 C ga yetsa to'xtating.",
+      "Aylanayotgan qismga qo'l tegizmang.",
+      "Qisilish (stall) sinovi 2 s dan oshmasin."
+    ],
+    "experiments": [
+      {
+        "label": "normal",
+        "how_uz": "idle, mid, rated yuklarda 30 daqiqadan (baza chizig'i)",
+        "faults": []
+      },
+      {
+        "label": "overload",
+        "how_uz": "chiqish valiga ishqalanish yuki (qo'l bilan emas, tormoz/ishqalanish lentasi) qo'shing",
+        "faults": [
+          "F09"
+        ]
+      },
+      {
+        "label": "unbalance",
+        "how_uz": "ventilyator/valga kichik vint yoki skotch massa",
+        "faults": [
+          "F02"
+        ]
+      },
+      {
+        "label": "loose_mount",
+        "how_uz": "motor bolti yarim bo'shatiladi",
+        "faults": [
+          "F04"
+        ]
+      },
+      {
+        "label": "cooling_blocked",
+        "how_uz": "ventilyatsiya teshiklari qisman yopiladi (60 C da to'xtating)",
+        "faults": [
+          "F10"
+        ]
+      },
+      {
+        "label": "supply_low",
+        "how_uz": "laboratoriya manbada kuchlanish 10-15% kamaytiriladi",
+        "faults": [
+          "F14"
+        ]
+      },
+      {
+        "label": "short_stall",
+        "how_uz": "rotor 1-2 s ushlanadi (tok cheklangan manbada)",
+        "faults": [
+          "F07"
+        ]
+      }
+    ]
+  }
+}
