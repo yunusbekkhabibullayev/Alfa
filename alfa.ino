@@ -270,10 +270,10 @@ button.row:active{background:var(--fill)}
       </div>
 
       <div class="tiles">
-        <div class="tile" style="--c:var(--blue)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-act"/></svg></span>Vibratsiya</div><div class="v num"><span id="v-vib">0.00</span><small>m/s&sup2;</small></div><div class="bar"><i id="b-vib"></i></div><div class="ft">Chegara 12.0</div></div>
-        <div class="tile" style="--c:var(--orange)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-temp"/></svg></span>Harorat</div><div class="v num"><span id="v-temp">0.0</span><small>&deg;C</small></div><div class="bar"><i id="b-temp"></i></div><div class="ft">Chegara 50 &deg;C</div></div>
-        <div class="tile" style="--c:var(--green)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-bolt"/></svg></span>Tok</div><div class="v num"><span id="v-cur">0.00</span><small>A</small></div><div class="bar"><i id="b-cur"></i></div><div class="ft">Chegara 1.5 A</div></div>
-        <div class="tile" style="--c:var(--purple)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-gauge"/></svg></span>Quvvat</div><div class="v num"><span id="v-pow">0.00</span><small>Vt</small></div><div class="bar"><i id="b-pow"></i></div><div class="ft">Chegara 5.5 Vt</div></div>
+        <div class="tile" style="--c:var(--blue)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-act"/></svg></span>Vibratsiya</div><div class="v num"><span id="v-vib">0.00</span><small>m/s&sup2;</small></div><div class="bar"><i id="b-vib"></i></div><div class="ft">Normal &le; 12.0</div></div>
+        <div class="tile" style="--c:var(--orange)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-temp"/></svg></span>Harorat</div><div class="v num"><span id="v-temp">0.0</span><small>&deg;C</small></div><div class="bar"><i id="b-temp"></i></div><div class="ft">Normal &lt; 50 &deg;C</div></div>
+        <div class="tile" style="--c:var(--green)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-bolt"/></svg></span>Tok</div><div class="v num"><span id="v-cur">0.00</span><small>A</small></div><div class="bar"><i id="b-cur"></i></div><div class="ft">Normal &le; 1.5 A</div></div>
+        <div class="tile" style="--c:var(--purple)"><div class="hd"><span class="ib soft"><svg class="i"><use href="#i-gauge"/></svg></span>Quvvat</div><div class="v num"><span id="v-pow">0.00</span><small>Vt</small></div><div class="bar"><i id="b-pow"></i></div><div class="ft">Normal &le; 5.5 Vt</div></div>
       </div>
 
       <div class="gh">LED tezkor boshqaruv</div>
@@ -345,9 +345,9 @@ button.row:active{background:var(--fill)}
       <h1 class="large">Datchiklar</h1>
       <div class="lead">Ulangan qurilmalar holati</div>
       <div class="group">
-        <div class="row"><span class="ib" style="--c:var(--blue)"><svg class="i"><use href="#i-act"/></svg></span><div class="rt"><b>MPU-6050</b><small>Vibratsiya &middot; chegara 12.0 m/s&sup2;</small></div><div class="rv num"><span id="d-vib">&ndash;</span><span class="dot" id="d-vib-s"></span></div></div>
-        <div class="row"><span class="ib" style="--c:var(--orange)"><svg class="i"><use href="#i-temp"/></svg></span><div class="rt"><b>DHT22</b><small>Harorat &middot; chegara 50 &deg;C</small></div><div class="rv num"><span id="d-temp">&ndash;</span><span class="dot" id="d-temp-s"></span></div></div>
-        <div class="row"><span class="ib" style="--c:var(--green)"><svg class="i"><use href="#i-bolt"/></svg></span><div class="rt"><b>ACS712</b><small>Tok &middot; chegara 1.5 A</small></div><div class="rv num"><span id="d-cur">&ndash;</span><span class="dot" id="d-cur-s"></span></div></div>
+        <div class="row"><span class="ib" style="--c:var(--blue)"><svg class="i"><use href="#i-act"/></svg></span><div class="rt"><b>MPU-6050</b><small>Vibratsiya &middot; normal &le; 12.0 m/s&sup2;</small></div><div class="rv num"><span id="d-vib">&ndash;</span><span class="dot" id="d-vib-s"></span></div></div>
+        <div class="row"><span class="ib" style="--c:var(--orange)"><svg class="i"><use href="#i-temp"/></svg></span><div class="rt"><b>DHT22</b><small>Harorat &middot; normal &lt; 50 &deg;C</small></div><div class="rv num"><span id="d-temp">&ndash;</span><span class="dot" id="d-temp-s"></span></div></div>
+        <div class="row"><span class="ib" style="--c:var(--green)"><svg class="i"><use href="#i-bolt"/></svg></span><div class="rt"><b>ACS712</b><small>Tok &middot; normal &le; 1.5 A</small></div><div class="rv num"><span id="d-cur">&ndash;</span><span class="dot" id="d-cur-s"></span></div></div>
       </div>
       <div class="gh">Tarmoq</div>
       <div class="group">
@@ -372,7 +372,7 @@ button.row:active{background:var(--fill)}
 const $=id=>document.getElementById(id);
 const AI_URL='https://alfa-vercel-ai.vercel.app/api/diagnose';
 // [yuqori, kritik] chegaralar. Mator uchun moslab o'zgartiring.
-const TH={vib:[1.5,12],temp:[40,50],cur:[0.9,1.5]};
+const TH={vib:[12,18],temp:[50,60],cur:[1.5,2.2]};
 const NAME={vib:'Vibratsiya',temp:'Harorat',cur:'Tok'};
 const UNIT={vib:'m/s²',temp:'°C',cur:'A',pow:'Vt'};
 const COL={vib:'--blue',temp:'--orange',cur:'--green',pow:'--purple'};
@@ -411,12 +411,9 @@ async function askAI(diag){
   const box=$('ai-box');
   const motorRules=(diag&&diag.triggered_rule_ids||[]).filter(id=>id!=='R14');
   if(!motorRules.length){
+    if(box.dataset.ok && Date.now()-aiAt<120000)return;
     aiKey='';box.dataset.ok='';
-    if(diag&&diag.triggered_rule_ids&&diag.triggered_rule_ids.includes('R14')){
-      box.innerHTML='<div class="row"><span class="ib soft" style="--c:var(--orange)">'+ic('alert')+'</span><div class="rt"><b class="ai-txt">Datchik ulanishini tekshiring (R14)</b><small>MPU-6050 yoki DHT22 javob bermayapti</small></div></div>';
-    }else{
-      box.innerHTML='<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">AI hisoboti</b>Holat normal: tahlil talab qilinmaydi</div>';
-    }
+    box.innerHTML='<div class="empty">'+ic('shield')+'<b style="color:var(--txt);font-weight:600">AI hisoboti</b>Holat normal: tahlil talab qilinmaydi</div>';
     return;
   }
   const key=motorRules.slice().sort().join(',');
@@ -613,9 +610,16 @@ float readCurrentAmps() {
 }
 
 void readSensors() {
-  if (mpuOk) {
-    sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
+  if (!mpuOk) {
+    if (mpu.begin()) {
+      mpuOk = true;
+      mpu.setAccelerometerRange(MPU6050_RANGE_4_G);
+      mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    }
+  }
+  sensors_event_t a, g, temp;
+  if (mpu.getEvent(&a, &g, &temp)) {
+    mpuOk = true;
     float totalAccel = sqrt(a.acceleration.x * a.acceleration.x +
                             a.acceleration.y * a.acceleration.y +
                             a.acceleration.z * a.acceleration.z);
