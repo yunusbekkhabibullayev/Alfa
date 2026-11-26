@@ -677,13 +677,13 @@ String buildDiagObj() {
     else if (String(lvl) == "watch" && level == "normal") level = "watch";
   };
 
-  if (currRatio >= 2.0 || temperatureC >= 65.0) addRule("R15", "critical");
-  if (currRatio >= 1.6 && (tempRiseRatePerMin >= 5.0 || vibRatio >= 2.0)) addRule("R01", "critical");
-  if (vibRatio >= 2.0 && tempDelta >= 25.0 && currRatio >= 1.3) addRule("R11", "alarm");
-  if (tempDelta >= 25.0 && currRatio >= 1.25) addRule("R07", "alarm");
-  if ((currRatio >= 1.15 && powRatio >= 1.15) && !(vibRatio >= 2.0 || currRatio >= 1.6)) addRule("R08", "warning");
-  if (tempDelta >= 15.0 && !(currRatio >= 1.15 || vibRatio >= 1.5)) addRule("R09", "warning");
-  if (vibRatio >= 1.5 && !(tempDelta >= 15.0 || currRatio >= 1.15)) addRule("R13", "warning");
+  if (currentAmps >= 2.2 || temperatureC >= 60.0) addRule("R15", "critical");
+  if (currentAmps >= 2.0 && (tempRiseRatePerMin >= 5.0 || vibrationMag > 12.0)) addRule("R01", "critical");
+  if (vibrationMag > 12.0 && temperatureC >= 50.0 && currentAmps > 1.5) addRule("R11", "alarm");
+  if (temperatureC >= 55.0 && currentAmps > 1.5) addRule("R07", "alarm");
+  if ((currentAmps > 1.5 || powerWatts > 5.5) && currentAmps < 2.2 && vibrationMag <= 12.0) addRule("R08", "warning");
+  if (temperatureC >= 50.0 && currentAmps <= 1.5 && vibrationMag <= 12.0) addRule("R09", "warning");
+  if (vibrationMag > 12.0 && temperatureC < 50.0 && currentAmps <= 1.5) addRule("R13", "warning");
   if (!sensorOk) addRule("R14", "watch");
 
   String json = "{";
